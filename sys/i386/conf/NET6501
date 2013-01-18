@@ -132,6 +132,22 @@ device		uart		# Generic UART driver
 # PCI Ethernet NICs.
 device		em		# Intel PRO/1000 adapter Gigabit Ethernet Card
 
+# Wireless NIC cards
+device		wlan		# 802.11 support
+options 	IEEE80211_DEBUG	# enable debug msgs
+options 	IEEE80211_AMPDU_AGE # age frames in AMPDU reorder q's
+options 	IEEE80211_SUPPORT_MESH	# enable 802.11s draft support
+device		wlan_wep	# 802.11 WEP support
+device		wlan_ccmp	# 802.11 CCMP support
+device		wlan_tkip	# 802.11 TKIP support
+device		wlan_amrr	# AMRR transmit rate control algorithm
+device		ath		# Atheros NICs
+device		ath_pci		# Atheros pci/cardbus glue
+device		ath_hal		# pci/cardbus chip support
+options		ATH_ENABLE_11N
+options 	AH_SUPPORT_AR5416	# enable AR5416 tx/rx descriptors
+device		ath_rate_sample	# SampleRate tx rate control for ath
+
 # PCI Ethernet NICs that use the common MII bus controller code.
 # NOTE: Be sure to keep the 'device miibus' line in order to use these NICs!
 # maybe for usb NICs?
