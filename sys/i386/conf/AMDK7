@@ -1,0 +1,197 @@
+#
+# GENERIC -- Generic machine with WD/AHx/NCR/BTx family disks
+#
+# For more information on this file, please read the handbook section on
+# Kernel Configuration Files:
+#
+#    http://www.freebsd.org/handbook/kernelconfig-config.html
+#
+# The handbook is also available locally in /usr/share/doc/handbook
+# if you've installed the doc distribution, otherwise always see the
+# FreeBSD World Wide Web server (http://www.FreeBSD.ORG/) for the
+# latest information.
+#
+# An exhaustive list of options and more detailed explanations of the
+# device lines is also present in the ./LINT configuration file. If you are
+# in doubt as to the purpose or necessity of a line, check first in LINT.
+#
+# $FreeBSD: src/sys/i386/conf/GENERIC,v 1.193 1999/10/14 11:33:57 obrien Exp $
+
+machine		i386
+cpu		I586_CPU
+cpu		I686_CPU
+ident		"AMDK7"
+maxusers	32
+
+makeoptions	DEBUG=-g		#Build kernel with gdb(1) debug symbols
+makeoptions	WITH_CTF=yes		#kernel objects with CTF
+
+#options		SCHED_4BSD		#4BSD scheduler
+options 	SCHED_ULE		#The ULE scheduler
+options 	PREEMPTION		# Enable kernel thread preemption
+options 	INET			#InterNETworking
+options 	INET6			#IPv6 communications protocols
+options 	FFS			#Berkeley Fast Filesystem
+#options 	MFS_ROOT		#MFS usable as root device, "MFS" req'ed
+options 	NFSCLIENT		#Network File System
+options 	NFSSERVER		#Network File System
+options 	MSDOSFS			#MSDOS Filesystem
+options 	CD9660			#ISO 9660 Filesystem
+options 	PROCFS			#Process filesystem
+options 	PSEUDOFS		#Pseudo-filesystem framework
+options 	COMPAT_43		#Compatible with BSD 4.3 [KEEP THIS!]
+options 	COMPAT_FREEBSD7		#Compatible with FreeBSD7
+options 	SCSI_DELAY=5000		#Be pessimistic about Joe SCSI device
+#options 	USERCONFIG		#boot -c editor
+options		KTRACE			#ktrace(1) syscall trace support
+options		SYSVSHM			#SYSV-style shared memory
+options		SYSVMSG			#SYSV-style message queues
+options		SYSVSEM			#SYSV-style semaphores
+options		NO_MEMORY_HOLE		#no isa memory hole
+options		CPU_WT_ALLOC
+options 	KDB			# Enable the debugger framework.
+options 	DDB			# Enable the kernel debugger.
+options 	SOFTUPDATES
+options		HZ=100
+options		ROUTETABLES=2		# max 16. 1 is back compatible.
+options 	KDTRACE_HOOKS		#Kernel DTrace
+options 	BREAK_TO_DEBUGGER	# A BREAK on a serial console goes to
+					# ddb, if available.
+options 	ALT_BREAK_TO_DEBUGGER	# CR ~ ^B to debugger.
+options 	HWPMC_HOOKS		# for hwpmc
+
+options 	ALTQ
+options 	ALTQ_CBQ	# Class Bases Queueing
+options 	ALTQ_RED	# Random Early Drop
+options 	ALTQ_RIO	# RED In/Out
+options 	ALTQ_HFSC	# Hierarchical Packet Scheduler
+options 	ALTQ_CDNR	# Traffic conditioner
+options 	ALTQ_PRIQ	# Priority Queueing
+options 	ALTQ_NOPCC	# Required for SMP build
+#options 	ALTQ_DEBUG
+
+# Gjournal-based UFS journaling support.
+#options 	UFS_GJOURNAL
+
+# Support for Capsicum
+options 	CAPABILITIES	# fine-grained rights on file descriptors
+options 	CAPABILITY_MODE	# sandboxes with no global namespace access
+
+# Support for process descriptors
+options		PROCDESC
+
+# Real time extensions added in the 1993 Posix
+options 	_KPOSIX_PRIORITY_SCHEDULING
+
+# To make an SMP kernel, the next two are needed
+options 	SMP			# Symmetric MultiProcessor Kernel
+device		apic
+
+#options 	WITNESS
+#options		INVARIANTS
+#options		INVARIANT_SUPPORT
+# these options might cause immediate panic on boot.
+#options 	MUTEX_DEBUG
+#options		WITNESS_DDB
+#
+# syscons options
+options 	SC_KERNEL_CONS_ATTR="(FG_GREEN|BG_BLACK)"
+options 	SC_KERNEL_CONS_REV_ATTR="(FG_BLACK|BG_GREEN)"
+
+# Maximum number of shared memory pages system wide.
+options 	SHMALL=4096
+
+# Maximum size, in pages, of a single System V shared memory region. 
+options 	SHMMAXPGS=2048
+
+device		isa
+device		pci
+device		acpi
+
+# Floppy drives
+device		fdc
+
+#
+# ATA and ATAPI devices
+# This is work in progress, use at your own risk.
+# It currently reuses the majors of wd.c and friends.
+# It cannot co-exist with the old system in one kernel.
+# You only need one "controller ata0" for it to find all
+# PCI devices on modern machines.
+#device		ata
+#device		atadisk		# ATA disk drives
+#device		atapicd		# ATAPI CDROM drives
+#device		atapifd		# ATAPI floppy drives
+#device		atapist		# ATAPI tape drives
+
+# Modular ATA
+device		atacore		# Core ATA functionality
+#device		atacard		# CARDBUS support
+#device		atabus		# PC98 cbus support
+#device		ataisa		# ISA bus support
+device		atapci		# PCI bus support; only generic chipset support
+device		ataintel	# Intel
+device		ada		# ATA disk drives (ATA/CAM)
+# for ATA/CAM
+options		ATA_CAM
+
+# SCSI Controllers
+# A single entry for any of these controllers (ncr, ahb, ahc) is
+# sufficient for any number of installed devices.
+device		sym		# NCR/Symbios Logic (newer chipsets)
+#device		bt
+
+# SCSI peripherals
+# Only one of each of these is needed, they are dynamically allocated.
+device		scbus		# SCSI bus (required)
+device		da		# Direct Access (disks)
+#device		sa		# Sequential Access (tape etc)
+device		cd		# CD
+device		pass		# Passthrough device (direct SCSI access)
+
+# atkbdc0 controls both the keyboard and the PS/2 mouse
+device		atkbdc
+device		atkbd
+device		psm
+device		vga
+
+# splash screen/screen saver
+device		splash
+
+# syscons is the default console driver, resembling an SCO console
+device		sc
+
+# Floating point support - do not disable.
+device		npx
+
+# Power management support (see LINT for more options)
+device		apm
+
+# Serial (COM) ports
+device		uart
+
+# Parallel port
+device		ppc
+device		ppbus		# Parallel port bus (required)
+device		lpt		# Printer
+device		plip		# TCP/IP over parallel
+device		ppi		# Parallel port interface device
+#device		vpo		# Requires scbus and da0
+
+device		miibus
+
+# Pseudo devices - the number indicates how many units to allocated.
+device		loop		# Network loopback
+device		ether		# Ethernet support
+device		tun		# Packet tunnel.
+device		pty		# Pseudo-ttys (telnet etc)
+
+# The `bpf' pseudo-device enables the Berkeley Packet Filter.
+# Be aware of the administrative consequences of enabling this!
+device		bpf		#Berkeley packet filter
+
+device		gif		# IPv6 and IPv4 tunneling
+device		faith		# IPv6-to-IPv4 relaying (translation)
+
+# Cryptographically secure random number generator; /dev/[u]random
+device		random
