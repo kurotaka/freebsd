@@ -308,6 +308,7 @@ SUBDIR=	\
 	${_sym} \
 	${_syscons} \
 	sysvipc \
+	${_tcwd} \
 	${_ti} \
 	tl \
 	tmpfs \
@@ -583,6 +584,7 @@ _nve=		nve
 .endif
 _nvram=		nvram
 _nxge=		nxge
+_tcwd=		tcwd
 _tpm=		tpm
 _viawd=		viawd
 _wpi=		wpi
@@ -708,6 +710,7 @@ _sound=		sound
 _speaker=	speaker
 _splash=	splash
 _sppp=		sppp
+_tcwd=		tcwd
 _tpm=		tpm
 _twa=		twa
 _vesa=		vesa
