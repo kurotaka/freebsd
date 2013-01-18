@@ -1579,3 +1579,19 @@ nd6_dad_na_input(struct ifaddr *ifa)
 	/* remove the address. */
 	nd6_dad_duplicated(ifa);
 }
+
+int
+nd6_need_ndproxy(struct ifnet *ifp, const struct in6_addr *daddr6)
+{
+	struct nd_ifinfo *ndi;
+
+	ndi = ND_IFINFO(ifp);
+	if (ndi == NULL)
+		return 0;
+
+	if (ndi->ndproxy == 0)
+		return 0;
+
+	return IN6_IS_ADDR_MC_LINKLOCAL(daddr6) ||
+	    IN6_IS_ADDR_LINKLOCAL(daddr6);
+}

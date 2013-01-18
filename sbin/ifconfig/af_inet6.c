@@ -69,6 +69,7 @@ static	int explicit_prefix = 0;
 
 extern void setnd6flags(const char *, int, int, const struct afswtch *);
 extern void setnd6defif(const char *, int, int, const struct afswtch *);
+extern void setnd6proxy(const char *, int, int, const struct afswtch *);
 extern void nd6_status(int);
 
 static	char addr_buf[MAXHOSTNAMELEN *2 + 1];	/*for getnameinfo()*/
@@ -516,6 +517,8 @@ static struct cmd inet6_cmds[] = {
 	DEF_CMD_ARG("pltime",        			setip6pltime),
 	DEF_CMD_ARG("vltime",        			setip6vltime),
 	DEF_CMD("eui64",	0,			setip6eui64),
+	DEF_CMD("ndproxy",	1,			setnd6proxy),
+	DEF_CMD("-ndproxy",	-1,			setnd6proxy),
 };
 
 static struct afswtch af_inet6 = {

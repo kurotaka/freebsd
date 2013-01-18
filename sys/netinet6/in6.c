@@ -304,6 +304,7 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
 	case SIOCSDEFIFACE_IN6:
 	case SIOCSIFINFO_FLAGS:
 	case SIOCSIFINFO_IN6:
+	case SIOCSNDPROXY:
 		if (td != NULL) {
 			error = priv_check(td, PRIV_NETINET_ND6);
 			if (error)
@@ -316,6 +317,7 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
 	case SIOCGPRLST_IN6:
 	case SIOCGNBRINFO_IN6:
 	case SIOCGDEFIFACE_IN6:
+	case SIOCGNDPROXY:
 		return (nd6_ioctl(cmd, data, ifp));
 
 #ifdef COMPAT_FREEBSD32

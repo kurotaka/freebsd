@@ -75,6 +75,7 @@ struct nd_ifinfo {
 	u_int8_t randomseed0[8]; /* upper 64 bits of MD5 digest */
 	u_int8_t randomseed1[8]; /* lower 64 bits (usually the EUI64 IFID) */
 	u_int8_t randomid[8];	/* current random ID */
+	int ndproxy;			/* running ndproxy on this if */
 };
 
 #define ND6_IFF_PERFORMNUD	0x1
@@ -430,6 +431,7 @@ caddr_t nd6_ifptomac(struct ifnet *);
 void nd6_dad_start(struct ifaddr *, int);
 void nd6_dad_stop(struct ifaddr *);
 void nd6_dad_duplicated(struct ifaddr *);
+int nd6_need_ndproxy(struct ifnet *, const struct in6_addr *);
 
 /* nd6_rtr.c */
 void nd6_rs_input(struct mbuf *, int, int);

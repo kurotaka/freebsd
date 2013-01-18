@@ -406,6 +406,16 @@ skip_routing:
 		in6_ifstat_inc(rt->rt_ifp, ifs6_in_discard);
 
 		if (V_ip6_log_time + V_ip6_log_interval < time_second) {
+			/* XXX incorrect but not filling up msgbuf... */
+			if (ip6->ip6_nxt == IPPROTO_ICMPV6 &&
+			    ND_IFINFO(m->m_pkthdr.rcvif)->ndproxy) {
+				if (mcopy) {
+					m_freem(mcopy);
+					mcopy = NULL;
+				}
+				goto bad;
+			}
+
 			V_ip6_log_time = time_second;
 			log(LOG_DEBUG,
 			    "cannot forward "

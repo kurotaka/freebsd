@@ -58,7 +58,7 @@ static const char rcsid[] =
 #define	MAX_SYSCTL_TRY	5
 #define	ND6BITS	"\020\001PERFORMNUD\002ACCEPT_RTADV\003PREFER_SOURCE" \
 		"\004IFDISABLED\005DONT_SET_IFROUTE\006AUTO_LINKLOCAL" \
-		"\007NO_RADR\010NO_PREFER_IFACE\020DEFAULTIF"
+		"\007NO_RADR\010NO_PREFER_IFACE\020DEFAULTIF\021NDPROXY"
 
 static int isnd6defif(int);
 void setnd6flags(const char *, int, int, const struct afswtch *);
@@ -138,12 +138,60 @@ isnd6defif(int s)
 }
 
 void
+setnd6proxy(const char *dummyaddr __unused,
+	int d, int s,
+	const struct afswtch *afp)
+{
+	struct in6_ndifreq ndifreq;
+	int ifindex;
+	int error;
+
+	memset(&ndifreq, 0, sizeof(ndifreq));
+	strncpy(ndifreq.ifname, ifr.ifr_name, sizeof(ndifreq.ifname));
+
+	if (d < 0) {
+		if (isnd6proxy(s)) {
+			/* ifindex = 0 means to stop ndproxy */
+			ifindex = 0;
+		} else
+			return;
+	} else if ((ifindex = if_nametoindex(ndifreq.ifname)) == 0) {
+		warn("if_nametoindex(%s)", ndifreq.ifname);
+		return;
+	}
+
+	ndifreq.ifindex = ifindex;
+	error = ioctl(s, SIOCSNDPROXY, (caddr_t)&ndifreq);
+	if (error)
+		warn("ioctl(SIOCSNDPROXY)");
+}
+
+static int
+isnd6proxy(int s)
+{
+	struct in6_ndifreq ndifreq;
+	unsigned int ifindex;
+	int error;
+
+	memset(&ndifreq, 0, sizeof(ndifreq));
+	strncpy(ndifreq.ifname, ifr.ifr_name, sizeof(ndifreq.ifname));
+
+	ifindex = if_nametoindex(ndifreq.ifname);
+	error = ioctl(s, SIOCGNDPROXY, (caddr_t)&ndifreq);
+	if (error) {
+		warn("ioctl(SIOCGNDPROXY)");
+		return (error);
+	}
+	return (ndifreq.ifindex != 0);
+}
+
+void
 nd6_status(int s)
 {
 	struct in6_ndireq nd;
 	int s6;
 	int error;
-	int isdefif;
+	int isdefif, isndproxy;
 
 	memset(&nd, 0, sizeof(nd));
 	strncpy(nd.ifname, ifr.ifr_name, sizeof(nd.ifname));
@@ -160,10 +208,12 @@ nd6_status(int s)
 		return;
 	}
 	isdefif = isnd6defif(s6);
+	isndproxy = isnd6proxy(s6);
 	close(s6);
-	if (nd.ndi.flags == 0 && !isdefif)
+	if (nd.ndi.flags == 0 && !isdefif && !isndproxy)
 		return;
 	printb("\tnd6 options",
-	    (unsigned int)(nd.ndi.flags | (isdefif << 15)), ND6BITS);
+	    (unsigned int)(nd.ndi.flags | (isdefif << 15) | (isndproxy << 16)),
+	    ND6BITS);
 	putchar('\n');
 }

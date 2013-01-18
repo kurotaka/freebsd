@@ -1522,6 +1522,19 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 		break;
 	case SIOCSDEFIFACE_IN6:	/* XXX: should be implemented as a sysctl? */
 		return (nd6_setdefaultiface(ndif->ifindex));
+	case SIOCSNDPROXY:
+		if (ND_IFINFO(ifp)->ndproxy && ndif->ifindex)
+			break;
+		if (!ND_IFINFO(ifp)->ndproxy && !ndif->ifindex)
+			break;
+		error = if_allmulti(ifp, (ndif->ifindex != 0));
+		if (error)
+			break;
+		ND_IFINFO(ifp)->ndproxy = ndif->ifindex ? ifp->if_index : 0;
+		break;
+	case SIOCGNDPROXY:
+		ndif->ifindex = ND_IFINFO(ifp)->ndproxy;
+		break;
 	}
 	return (error);
 }

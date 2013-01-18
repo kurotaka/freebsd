@@ -463,6 +463,9 @@ struct	in6_rrenumreq {
 #define SIOCAADDRCTL_POLICY	_IOW('u', 108, struct in6_addrpolicy)
 #define SIOCDADDRCTL_POLICY	_IOW('u', 109, struct in6_addrpolicy)
 
+#define	SIOCSNDPROXY		_IOW('i', 110, struct in6_ndifreq)
+#define	SIOCGNDPROXY		_IOWR('i', 111, struct in6_ndifreq)
+
 #define IN6_IFF_ANYCAST		0x01	/* anycast address */
 #define IN6_IFF_TENTATIVE	0x02	/* tentative address */
 #define IN6_IFF_DUPLICATED	0x04	/* DAD detected duplicate */
