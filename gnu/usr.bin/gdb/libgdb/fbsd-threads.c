@@ -1797,3 +1797,183 @@ ps_linfo(struct ps_prochandle *ph, lwpid_t lwpid, void *info)
     return PS_ERR;
   return PS_OK;
 }
+
+
+#if defined(HAVE_PT_GETDBREGS) && defined(I386_DR_LOW_SET_ADDR)
+/* Hardware watchpoint support based on i386bsd-nat.c: */
+/* Native-dependent code for modern i386 BSD's.
+   Copyright 2000, 2001, 2002, 2003 Free Software Foundation, Inc.
+
+   This file is part of GDB.
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 59 Temple Place - Suite 330,
+   Boston, MA 02111-1307, USA.  */
+
+/*
+ * We need to add threads support because debug registers need to be
+ * set per LWP to implement hardware watchpoints.
+ *
+ * We do not need to care user-level threads contexts for debug registers
+ * since they are not in mcontext.
+ */
+
+/* Not all versions of FreeBSD/i386 that support the debug registers
+   have this macro.  */
+#ifndef DBREG_DRX
+#define DBREG_DRX(d, x) ((&d->dr0)[x])
+#endif
+
+static void
+fbsd_lwp_dr_set (lwpid_t lwpid, int regnum, unsigned long value)
+{
+  struct dbreg dbregs;
+
+  if (ptrace (PT_GETDBREGS, lwpid,
+              (PTRACE_ARG3_TYPE) &dbregs, 0) == -1)
+    perror_with_name ("Couldn't get debug registers");
+
+  /* For some mysterious reason, some of the reserved bits in the
+     debug control register get set.  Mask these off, otherwise the
+     ptrace call below will fail.  */
+  DBREG_DRX ((&dbregs), 7) &= ~(0x0000fc00);
+
+  DBREG_DRX ((&dbregs), regnum) = value;
+
+  if (ptrace (PT_SETDBREGS, lwpid,
+              (PTRACE_ARG3_TYPE) &dbregs, 0) == -1)
+    perror_with_name ("Couldn't write debug registers");
+}
+
+struct dr_set_thr_arg {
+  int regnum;
+  unsigned long value;
+};
+
+static int
+fbsd_thread_dr_set_callback (const td_thrhandle_t *th_p, void *data)
+{
+  struct dr_set_thr_arg *arg = data;
+  td_thrinfo_t ti;
+  td_err_e err;
+
+  err = td_thr_get_info_p (th_p, &ti);
+  if (err != TD_OK)
+    error ("Cannot get thread info: %s", thread_db_err_str (err));
+
+  /* Ignore zombie */
+  if (ti.ti_state == TD_THR_UNKNOWN || ti.ti_state == TD_THR_ZOMBIE)
+    return 0;
+
+  fbsd_lwp_dr_set (ti.ti_lid, arg->regnum, arg->value);
+  return 0;
+}
+
+static void
+fbsd_thread_dr_set (int regnum, unsigned long value)
+{
+  struct dr_set_thr_arg arg;
+  td_err_e err;
+
+  arg.regnum = regnum;
+  arg.value = value;
+
+  /* Iterating over LWPs is sufficient actually. */
+  err = td_ta_thr_iter_p (thread_agent, fbsd_thread_dr_set_callback, &arg,
+          TD_THR_ANY_STATE, TD_THR_LOWEST_PRIORITY,
+          TD_SIGNO_MASK, TD_THR_ANY_USER_FLAGS);
+  if (err != TD_OK)
+    error ("Cannot set debug registers: %s", thread_db_err_str (err));
+}
+
+void
+fbsd_thread_dr_set_control (unsigned long control)
+{
+  if (fbsd_thread_active)
+    fbsd_thread_dr_set (7, control);
+  else
+    fbsd_lwp_dr_set (GET_PID (inferior_ptid), 7, control);
+}
+
+void
+fbsd_thread_dr_set_addr (int regnum, CORE_ADDR addr)
+{
+  gdb_assert (regnum >= 0 && regnum <= 4);
+
+  if (fbsd_thread_active)
+    fbsd_thread_dr_set (regnum, addr);
+  else
+    fbsd_lwp_dr_set (GET_PID (inferior_ptid), regnum, addr);
+}
+
+void
+fbsd_thread_dr_reset_addr (int regnum)
+{
+  gdb_assert (regnum >= 0 && regnum <= 4);
+
+  if (fbsd_thread_active)
+    fbsd_thread_dr_set (regnum, 0);
+  else
+    fbsd_lwp_dr_set (GET_PID (inferior_ptid), regnum, 0);
+}
+
+unsigned long
+fbsd_thread_dr_get_status (void)
+{
+  struct dbreg dbregs;
+  td_thrhandle_t th;
+  td_thrinfo_t ti;
+  td_err_e err;
+  lwpid_t lwpid;
+
+  if (IS_THREAD (inferior_ptid))
+    {
+      err = td_ta_map_id2thr_p (thread_agent, GET_THREAD (inferior_ptid), &th);
+      if (err != TD_OK)
+        error ("Cannot find thread %d: Thread ID=%ld, %s",
+               pid_to_thread_id (inferior_ptid),
+               GET_THREAD (inferior_ptid), thread_db_err_str (err));
+
+      err = td_thr_get_info_p (&th, &ti);
+      if (err != TD_OK)
+        error ("Cannot get thread info: %s", thread_db_err_str (err));
+
+      lwpid = ti.ti_lid;
+    }
+  else if (IS_LWP (inferior_ptid))
+    {
+      lwpid = GET_LWP (inferior_ptid);
+    }
+  else
+    {
+      lwpid = GET_PID (inferior_ptid);
+    }
+
+  /* FIXME: kettenis/2001-03-31: Calling perror_with_name if the
+     ptrace call fails breaks debugging remote targets.  The correct
+     way to fix this is to add the hardware breakpoint and watchpoint
+     stuff to the target vector.  For now, just return zero if the
+     ptrace call fails.  */
+  if (ptrace (PT_GETDBREGS, GET_PID (inferior_ptid),
+              (PTRACE_ARG3_TYPE) & dbregs, 0) == -1)
+#if 0
+    perror_with_name ("Couldn't read debug registers");
+#else
+    return 0;
+#endif
+
+  return DBREG_DRX ((&dbregs), 6);
+}
+
+#endif /* PT_GETDBREGS && I386_DR_LOW_SET_ADDR */
