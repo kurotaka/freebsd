@@ -847,6 +847,21 @@ send:
 			m_copydata(mb, moff, (int)len,
 			    mtod(m, caddr_t) + hdrlen);
 			m->m_len += len;
+		} else if (len <= MCLBYTES - hdrlen - max_linkhdr) {
+			if ((m->m_flags & M_EXT) == 0) {
+				MCLGET(m, M_DONTWAIT);
+
+				if ((m->m_flags & M_EXT) == 0) {
+					SOCKBUF_UNLOCK(&so->so_snd);
+					m_freem(m);
+					error = ENOBUFS;
+					goto out;
+				}
+			}
+
+			m_copydata(mb, moff, (int)len,
+			    mtod(m, caddr_t) + hdrlen);
+			m->m_len += len;
 		} else {
 			m->m_next = m_copy(mb, moff, (int)len);
 			if (m->m_next == NULL) {
