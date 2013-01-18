@@ -1936,7 +1936,7 @@ do_link_state_change(void *arg, int pending)
 		    NULL);
 	if (pending > 1)
 		if_printf(ifp, "%d link states coalesced\n", pending);
-	if (log_link_state_change)
+	if (log_link_state_change && !(ifp->if_flags & IFF_LSQUIET))
 		log(LOG_NOTICE, "%s: link state changed to %s\n", ifp->if_xname,
 		    (link_state == LINK_STATE_UP) ? "UP" : "DOWN" );
 	EVENTHANDLER_INVOKE(ifnet_link_event, ifp, ifp->if_link_state);
