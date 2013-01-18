@@ -429,7 +429,7 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((td->td_pflags & TDP_ALTSTACK) && !oonstack &&
+	if (((td->td_sigstk.ss_flags & SS_DISABLE) == 0) && !oonstack &&
 	    SIGISMEMBER(psp->ps_sigonstack, sig)) {
 		fp = (struct l_rt_sigframe *)(td->td_sigstk.ss_sp +
 		    td->td_sigstk.ss_size - sizeof(struct l_rt_sigframe));
@@ -462,8 +462,14 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	frame.sf_sc.uc_stack.ss_sp = td->td_sigstk.ss_sp;
 	frame.sf_sc.uc_stack.ss_size = td->td_sigstk.ss_size;
-	frame.sf_sc.uc_stack.ss_flags = (td->td_pflags & TDP_ALTSTACK)
-	    ? ((oonstack) ? LINUX_SS_ONSTACK : 0) : LINUX_SS_DISABLE;
+	if ((td->td_sigstk.ss_flags & SS_DISABLE) != 0)
+		frame.sf_sc.uc_stack.ss_flags = LINUX_SS_DISABLE;
+	else {
+		if (oonstack)
+			frame.sf_sc.uc_stack.ss_flags = LINUX_SS_ONSTACK;
+		else
+			frame.sf_sc.uc_stack.ss_flags = 0;
+	}
 	PROC_UNLOCK(p);
 
 	bsd_to_linux_sigset(mask, &frame.sf_sc.uc_sigmask);
@@ -570,7 +576,7 @@ linux_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((td->td_pflags & TDP_ALTSTACK) && !oonstack &&
+	if (((td->td_sigstk.ss_flags & SS_DISABLE) == 0) && !oonstack &&
 	    SIGISMEMBER(psp->ps_sigonstack, sig)) {
 		fp = (struct l_sigframe *)(td->td_sigstk.ss_sp +
 		    td->td_sigstk.ss_size - sizeof(struct l_sigframe));

@@ -401,7 +401,9 @@ do {									\
 #define	TDP_INKTRACE	0x00000004 /* Thread is currently in KTRACE code. */
 #define	TDP_BUFNEED	0x00000008 /* Do not recurse into the buf flush */
 #define	TDP_COWINPROGRESS 0x00000010 /* Snapshot copy-on-write in progress. */
+#if 0
 #define	TDP_ALTSTACK	0x00000020 /* Have alternate signal stack. */
+#endif
 #define	TDP_DEADLKTREAT	0x00000040 /* Lock aquisition - deadlock treatment. */
 #define	TDP_NOFAULTING	0x00000080 /* Do not handle page faults. */
 #define	TDP_NOSLEEPING	0x00000100 /* Thread is not allowed to sleep on a sq. */

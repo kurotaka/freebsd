@@ -440,7 +440,7 @@ svr4_sendsig(catcher, ksi, mask)
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((td->td_pflags & TDP_ALTSTACK) && !oonstack &&
+	if (((td->td_sigstk.ss_flags & SS_DISABLE) == 0) && !oonstack &&
 	    SIGISMEMBER(psp->ps_sigonstack, sig)) {
 		fp = (struct svr4_sigframe *)(td->td_sigstk.ss_sp +
 		    td->td_sigstk.ss_size - sizeof(struct svr4_sigframe));

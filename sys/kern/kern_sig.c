@@ -601,7 +601,7 @@ sigonstack(size_t sp)
 {
 	struct thread *td = curthread;
 
-	return ((td->td_pflags & TDP_ALTSTACK) ?
+	return (!(td->td_sigstk.ss_flags & SS_DISABLE) ?
 #if defined(COMPAT_43)
 	    ((td->td_sigstk.ss_size == 0) ?
 		(td->td_sigstk.ss_flags & SS_ONSTACK) :
@@ -954,7 +954,6 @@ execsigs(struct proc *p)
 	td->td_sigstk.ss_flags = SS_DISABLE;
 	td->td_sigstk.ss_size = 0;
 	td->td_sigstk.ss_sp = 0;
-	td->td_pflags &= ~TDP_ALTSTACK;
 	/*
 	 * Reset no zombies if child dies flag as Solaris does.
 	 */
@@ -1525,7 +1524,7 @@ osigstack(td, uap)
 		td->td_sigstk.ss_sp = nss.ss_sp;
 		td->td_sigstk.ss_size = 0;
 		td->td_sigstk.ss_flags |= nss.ss_onstack & SS_ONSTACK;
-		td->td_pflags |= TDP_ALTSTACK;
+		td->td_sigstk.ss_flags &= ~SS_DISABLE;
 	}
 	if (uap->oss != NULL)
 		error = copyout(&oss, uap->oss, sizeof(oss));
@@ -1573,8 +1572,8 @@ kern_sigaltstack(struct thread *td, stack_t *ss, stack_t *oss)
 
 	if (oss != NULL) {
 		*oss = td->td_sigstk;
-		oss->ss_flags = (td->td_pflags & TDP_ALTSTACK)
-		    ? ((oonstack) ? SS_ONSTACK : 0) : SS_DISABLE;
+		oss->ss_flags = (td->td_sigstk.ss_flags & SS_DISABLE)
+		    ? SS_DISABLE : ((oonstack) ? SS_ONSTACK : 0);
 	}
 
 	if (ss != NULL) {
@@ -1587,9 +1586,9 @@ kern_sigaltstack(struct thread *td, stack_t *ss, stack_t *oss)
 				return (ENOMEM);
 
 			td->td_sigstk = *ss;
-			td->td_pflags |= TDP_ALTSTACK;
+			td->td_sigstk.ss_flags &= ~SS_DISABLE;
 		} else {
-			td->td_pflags &= ~TDP_ALTSTACK;
+			td->td_sigstk.ss_flags |= SS_DISABLE;
 		}
 	}
 	return (0);
