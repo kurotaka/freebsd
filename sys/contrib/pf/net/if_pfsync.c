@@ -902,6 +902,15 @@ pfsync_input(struct mbuf *m, ...)
 #endif
 		goto done;
 
+	/* verify that the interface is up */
+#ifdef __FreeBSD__
+	if (!(sc->sc_ifp->if_flags & IFF_UP))
+		goto done;
+#else
+	if (!(sc->sc_if.if_flags & IFF_UP))
+		goto done;
+#endif
+
 	/* verify that the packet came in on the right interface */
 	if (sc->sc_sync_if != m->m_pkthdr.rcvif) {
 		V_pfsyncstats.pfsyncs_badif++;
@@ -2144,6 +2153,11 @@ pfsync_sendout(void)
 
 	if (sc == NULL || sc->sc_len == PFSYNC_MINPKT)
 		return;
+
+#ifdef __FreeBSD__
+	if (!(sc->sc_ifp->if_flags & IFF_UP))
+		return;
+#endif
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf == NULL && sc->sc_sync_if == NULL) {
