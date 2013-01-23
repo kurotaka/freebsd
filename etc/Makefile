@@ -156,6 +156,9 @@ ETCMAIL=Makefile README mailer.conf access.sample virtusertable.sample \
 # Special top level files for FreeBSD
 FREEBSD=COPYRIGHT
 
+# Sanitize DESTDIR
+DESTDIR:=	${DESTDIR:C://*:/:g}
+
 afterinstall:
 .if ${MK_MAN} != "no"
 	${_+_}cd ${.CURDIR}/../share/man; ${MAKE} makedb
@@ -324,26 +327,43 @@ distrib-dirs:
 		    -f $$m -p $$d; \
 		${MTREE_CMD} -deU ${MTREE_FOLLOWS_SYMLINKS} -f $$m -p $$d; \
 	done; true
-	ln -sfh usr/src/sys ${DESTDIR}/sys
+.if defined(NO_ROOT)
+	@set ${MTREES}; \
+	while test $$# -ge 2; do \
+		m=${.CURDIR}/$$1; \
+		shift; \
+		d=$$1; \
+		test "$$d" == "/" && d=""; \
+		d=${DISTBASE}$$d; \
+		shift; \
+		${ECHO} "${MTREE_CMD} -C -f $$m | sed s#^\.#.$$d# >>" \
+		    "${METALOG}" ; \
+		${MTREE_CMD} -C -f $$m | sed s#^\.#.$$d# >> ${METALOG} ; \
+	done; true
+.endif
+	${INSTALL_SYMLINK} usr/src/sys ${DESTDIR}/sys
 	cd ${DESTDIR}/usr/share/man; \
 	for mandir in man*; do \
-		ln -sfh ../$$mandir ${DESTDIR}/usr/share/man/en.ISO8859-1/; \
-		ln -sfh ../$$mandir ${DESTDIR}/usr/share/man/en.UTF-8/; \
+		${INSTALL_SYMLINK} ../$$mandir \
+		    ${DESTDIR}/usr/share/man/en.ISO8859-1/; \
+		${INSTALL_SYMLINK} ../$$mandir \
+		    ${DESTDIR}/usr/share/man/en.UTF-8/; \
 	done
 	cd ${DESTDIR}/usr/share/openssl/man; \
 	for mandir in man*; do \
-		ln -sfh ../$$mandir \
+		${INSTALL_SYMLINK} ../$$mandir \
 		    ${DESTDIR}/usr/share/openssl/man/en.ISO8859-1/; \
 	done
 	set - `grep "^[a-zA-Z]" ${.CURDIR}/man.alias`; \
 	while [ $$# -gt 0 ] ; do \
-		ln -sfh "$$2" "${DESTDIR}/usr/share/man/$$1"; \
-		ln -sfh "$$2" "${DESTDIR}/usr/share/openssl/man/$$1"; \
+		${INSTALL_SYMLINK} "$$2" "${DESTDIR}/usr/share/man/$$1"; \
+		${INSTALL_SYMLINK} "$$2" \
+		    "${DESTDIR}/usr/share/openssl/man/$$1"; \
 		shift; shift; \
 	done
 	set - `grep "^[a-zA-Z]" ${.CURDIR}/nls.alias`; \
 	while [ $$# -gt 0 ] ; do \
-		ln -sfh "$$2" "${DESTDIR}/usr/share/nls/$$1"; \
+		${INSTALL_SYMLINK} "$$2" "${DESTDIR}/usr/share/nls/$$1"; \
 		shift; shift; \
 	done
 
