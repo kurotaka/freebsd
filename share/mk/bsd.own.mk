@@ -385,6 +385,7 @@ __DEFAULT_YES_OPTIONS = \
     OPENSSH \
     OPENSSL \
     PAM \
+    PC_SYSINSTALL \
     PF \
     PKGTOOLS \
     PMC \
@@ -531,10 +532,6 @@ MK_ZFS:=	no
 MK_CTF:=	no
 .endif
 
-.if ${MK_CLANG} == "no"
-MK_CLANG_EXTRAS:= no
-.endif
-
 .if ${MK_CRYPT} == "no"
 MK_OPENSSL:=	no
 MK_OPENSSH:=	no
@@ -581,6 +578,7 @@ MK_GDB:=	no
 .endif
 
 .if ${MK_CLANG} == "no"
+MK_CLANG_EXTRAS:= no
 MK_CLANG_IS_CC:= no
 .endif
 
