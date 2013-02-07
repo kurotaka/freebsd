@@ -61,8 +61,10 @@ static const char rcsid[] =
 		"\007NO_RADR\010NO_PREFER_IFACE\020DEFAULTIF\021NDPROXY"
 
 static int isnd6defif(int);
+static int isnd6proxy(int);
 void setnd6flags(const char *, int, int, const struct afswtch *);
 void setnd6defif(const char *, int, int, const struct afswtch *);
+void setnd6proxy(const char *, int, int, const struct afswtch *);
 void nd6_status(int);
 
 void
