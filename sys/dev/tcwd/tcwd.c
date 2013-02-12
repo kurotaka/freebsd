@@ -52,6 +52,13 @@ __FBSDID("$FreeBSD$");
 #define	tcwd_write_1(sc, off, val)	\
 	bus_write_4((sc)->wd_res, (off), (val))
 
+#define DPRINTF(sc, fmt, ...)		do {			\
+	if (tcwd_debug)						\
+		device_printf((sc)->dev, fmt, __VA_ARGS__);	\
+} while (0)
+
+int tcwd_debug;
+
 static struct tcwd_device tcwd_devices[] = {
 	{ DEVICEID_TC_LPC,	"Intel Atom E6xx watchdog timer" },
 	{ 0, NULL },
@@ -83,7 +90,7 @@ tcwd_timer_init(struct tcwd_softc *sc, unsigned int cmd)
 	preload = ((1ULL << cmd) * 33 / 1000) >> 15;
 	preload--;
 
-printf("%s preload=0x%x\n", __func__, preload);
+	DPRINTF(sc, "%s preload=0x%x\n", __func__, preload);
 	/*
 	 * Set watchdog to perform a cold reset toggling the GPIO pin and the
 	 * prescaler set to 1ms-10m resolution.
@@ -104,7 +111,7 @@ printf("%s preload=0x%x\n", __func__, preload);
 static void
 tcwd_timer_start(struct tcwd_softc *sc)
 {
-printf("%s\n", __func__);
+	DPRINTF(sc, "%s\n", __func__);
 	tcwd_write_1(sc, TC_WD_WDTLR, TC_WD_WDTLR_WDT_ENABLE);
 	sc->active = 1;
 }
@@ -112,7 +119,7 @@ printf("%s\n", __func__);
 static void
 tcwd_timer_stop(struct tcwd_softc *sc)
 {
-printf("%s\n", __func__);
+	DPRINTF(sc, "%s\n", __func__);
 	/* Disable watchdog, with a reload before for safety */
 	tcwd_unlock_reg(sc);
 	tcwd_write_1(sc, TC_WD_RR1, TC_WD_RR1_RELOAD);
@@ -126,7 +133,7 @@ tcwd_event(void *arg, unsigned int cmd, int *error)
 	struct tcwd_softc *sc = arg;
 
 	cmd &= WD_INTERVAL;
-printf("%s: cmd 0x%x\n", __func__, cmd);
+	DPRINTF(sc, "%s: cmd 0x%x\n", __func__, cmd);
 	if (cmd) {
 		if (cmd != sc->timeout)
 			tcwd_timer_init(sc, cmd);
@@ -263,7 +270,6 @@ tcwd_attach(device_t dev)
 		bus_write_4(sc->gpio_res, TC_GPIO_CGEN, reg);
 		device_printf(dev, "GPIO[4] modified for the watchdog.\n");
 	}
-printf("CGEN 0x%x\n", bus_read_4(sc->gpio_res, TC_GPIO_CGEN));
 #endif
 
 	reg = tcwd_read_1(sc, TC_WD_RR1);
