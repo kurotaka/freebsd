@@ -134,7 +134,9 @@ cam/scsi/scsi_low_pisa.c	optional ct | ncv | nsp | stg
 cam/scsi/scsi_pass.c		optional pass
 cam/scsi/scsi_pt.c		optional pt
 cam/scsi/scsi_sa.c		optional sa
-cam/scsi/scsi_ses.c		optional ses
+cam/scsi/scsi_enc.c		optional ses
+cam/scsi/scsi_enc_ses.c		optional ses
+cam/scsi/scsi_enc_safte.c	optional ses
 cam/scsi/scsi_sg.c		optional sg
 cam/scsi/scsi_targ_bh.c		optional targbh
 cam/scsi/scsi_target.c		optional targ
@@ -957,7 +959,7 @@ t4fw.fwo		optional cxgbe					\
 	no-implicit-rule						\
 	clean		"t4fw.fwo"
 t4fw.fw			optional cxgbe					\
-	dependency	"$S/dev/cxgbe/firmware/t4fw-1.6.2.0.bin.uu"	\
+	dependency	"$S/dev/cxgbe/firmware/t4fw-1.8.4.0.bin.uu"	\
 	compile-with	"${NORMAL_FW}"					\
 	no-obj no-implicit-rule						\
 	clean		"t4fw.fw"
@@ -1555,7 +1557,6 @@ mwlboot.fw		optional mwlfw					\
 	no-obj no-implicit-rule						\
 	clean		"mwlboot.fw"
 dev/mxge/if_mxge.c		optional mxge pci
-dev/mxge/mxge_lro.c		optional mxge pci
 dev/mxge/mxge_eth_z8e.c		optional mxge pci
 dev/mxge/mxge_ethp_z8e.c	optional mxge pci
 dev/mxge/mxge_rss_eth_z8e.c	optional mxge pci

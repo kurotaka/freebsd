@@ -111,7 +111,7 @@ static int atapi_dma = 1;
 #endif
 
 /* sysctl vars */
-SYSCTL_NODE(_hw, OID_AUTO, ata, CTLFLAG_RD, 0, "ATA driver parameters");
+static SYSCTL_NODE(_hw, OID_AUTO, ata, CTLFLAG_RD, 0, "ATA driver parameters");
 #ifndef ATA_CAM
 TUNABLE_INT("hw.ata.ata_dma", &ata_dma);
 SYSCTL_INT(_hw_ata, OID_AUTO, ata_dma, CTLFLAG_RDTUN, &ata_dma, 0,
@@ -869,7 +869,7 @@ ata_boot_attach(void)
 
     mtx_lock(&Giant);       /* newbus suckage it needs Giant */
 
-    /* kick of probe and attach on all channels */
+    /* kick off probe and attach on all channels */
     for (ctlr = 0; ctlr < devclass_get_maxunit(ata_devclass); ctlr++) {
 	if ((ch = devclass_get_softc(ata_devclass, ctlr))) {
 	    ata_identify(ch->dev);

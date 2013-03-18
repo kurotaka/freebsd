@@ -181,6 +181,15 @@ NLSMODE?=	${NOBINMODE}
 
 INCLUDEDIR?=	/usr/include
 
+#
+# install(1) parameters.
+#
+HRDLINK?=	-l h
+SYMLINK?=	-l s
+
+INSTALL_LINK?=		${INSTALL} ${HRDLINK}
+INSTALL_SYMLINK?=	${INSTALL} ${SYMLINK}
+
 # Common variables
 .if !defined(DEBUG_FLAGS)
 STRIP?=		-s
@@ -431,6 +440,7 @@ __DEFAULT_NO_OPTIONS = \
     LIBCPLUSPLUS \
     NMTREE \
     OFED \
+    OPENSSH_NONE_CIPHER \
     SHARED_TOOLCHAIN
 
 #
@@ -448,9 +458,9 @@ __T=${MACHINE_ARCH}
 .endif
 # Clang is only for x86 and powerpc right now, by default.
 .if ${__T} == "amd64" || ${__T} == "i386" || ${__T:Mpowerpc*}
-__DEFAULT_YES_OPTIONS+=CLANG
+__DEFAULT_YES_OPTIONS+=CLANG CLANG_FULL
 .else
-__DEFAULT_NO_OPTIONS+=CLANG
+__DEFAULT_NO_OPTIONS+=CLANG CLANG_FULL
 .endif
 # FDT is needed only for arm and powerpc
 .if ${__T:Marm*} || ${__T:Mpowerpc*}
@@ -579,6 +589,7 @@ MK_GDB:=	no
 
 .if ${MK_CLANG} == "no"
 MK_CLANG_EXTRAS:= no
+MK_CLANG_FULL:= no
 MK_CLANG_IS_CC:= no
 .endif
 

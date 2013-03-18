@@ -376,7 +376,8 @@ static void	witness_setflag(struct lock_object *lock, int flag, int set);
 #define	witness_debugger(c)
 #endif
 
-SYSCTL_NODE(_debug, OID_AUTO, witness, CTLFLAG_RW, NULL, "Witness Locking");
+static SYSCTL_NODE(_debug, OID_AUTO, witness, CTLFLAG_RW, NULL,
+    "Witness Locking");
 
 /*
  * If set to 0, lock order checking is disabled.  If set to -1,
@@ -562,7 +563,7 @@ static struct witness_order_list_entry order_lists[] = {
 	 * BPF
 	 */
 	{ "bpf global lock", &lock_class_mtx_sleep },
-	{ "bpf interface lock", &lock_class_mtx_sleep },
+	{ "bpf interface lock", &lock_class_rw },
 	{ "bpf cdev lock", &lock_class_mtx_sleep },
 	{ NULL, NULL },
 	/*

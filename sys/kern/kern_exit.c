@@ -200,6 +200,14 @@ exit1(struct thread *td, int rv)
 	_STOPEVENT(p, S_EXIT, rv);
 
 	/*
+	 * Ignore any pending request to stop due to a stop signal.
+	 * Once P_WEXIT is set, future requests will be ignored as
+	 * well.
+	 */
+	p->p_flag &= ~P_STOPPED_SIG;
+	KASSERT(!P_SHOULDSTOP(p), ("exiting process is stopped"));
+
+	/*
 	 * Note that we are exiting and do another wakeup of anyone in
 	 * PIOCWAIT in case they aren't listening for S_EXIT stops or
 	 * decided to wait again after we told them we are exiting.
@@ -259,7 +267,7 @@ exit1(struct thread *td, int rv)
 	PROC_LOCK(p);
 	rv = p->p_xstat;	/* Event handler could change exit status */
 	stopprofclock(p);
-	p->p_flag &= ~(P_TRACED | P_PPWAIT);
+	p->p_flag &= ~(P_TRACED | P_PPWAIT | P_PPTRACE);
 
 	/*
 	 * Stop the real interval timer.  If the handler is currently
@@ -1019,20 +1027,18 @@ kern_wait(struct thread *td, pid_t pid, int *status, int options,
     struct rusage *rusage)
 {
 	struct __wrusage wru, *wrup;
-	struct proc *q;
 	idtype_t idtype;
 	id_t id;
 	int ret;
 
+	/*
+	 * Translate the special pid values into the (idtype, pid)
+	 * pair for kern_wait6.  The WAIT_MYPGRP case is handled by
+	 * kern_wait6() on its own.
+	 */
 	if (pid == WAIT_ANY) {
 		idtype = P_ALL;
 		id = 0;
-	} else if (pid == WAIT_MYPGRP) {
-		idtype = P_PGID;
-		q = td->td_proc;
-		PROC_LOCK(q);
-		id = (id_t)q->p_pgid;
-		PROC_UNLOCK(q);
 	} else if (pid < 0) {
 		idtype = P_PGID;
 		id = (id_t)-pid;
@@ -1040,10 +1046,12 @@ kern_wait(struct thread *td, pid_t pid, int *status, int options,
 		idtype = P_PID;
 		id = (id_t)pid;
 	}
+
 	if (rusage != NULL)
 		wrup = &wru;
 	else
 		wrup = NULL;
+
 	/*
 	 * For backward compatibility we implicitly add flags WEXITED
 	 * and WTRAPPED here.
