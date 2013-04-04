@@ -206,6 +206,9 @@ SYSCTL_INT(_vfs, OID_AUTO, flushbufqtarget, CTLFLAG_RW, &flushbufqtarget, 0,
 static long notbufdflashes;
 SYSCTL_LONG(_vfs, OID_AUTO, notbufdflashes, CTLFLAG_RD, &notbufdflashes, 0,
     "Number of dirty buffer flushes done by the bufdaemon helpers");
+static long barrierwrites;
+SYSCTL_LONG(_vfs, OID_AUTO, barrierwrites, CTLFLAG_RW, &barrierwrites, 0,
+    "Number of barrier writes");
 
 /*
  * Wakeup point for bufdaemon, as well as indicator of whether it is already
@@ -914,6 +917,9 @@ bufwrite(struct buf *bp)
 		return (0);
 	}
 
+	if (bp->b_flags & B_BARRIER)
+		barrierwrites++;
+
 	oldflags = bp->b_flags;
 
 	BUF_ASSERT_HELD(bp);
@@ -930,7 +936,13 @@ bufwrite(struct buf *bp)
 	else
 		vp_md = 0;
 
-	/* Mark the buffer clean */
+	/*
+	 * Mark the buffer clean.  Increment the bufobj write count
+	 * before bundirty() call, to prevent other thread from seeing
+	 * empty dirty list and zero counter for writes in progress,
+	 * falsely indicating that the bufobj is clean.
+	 */
+	bufobj_wref(bp->b_bufobj);
 	bundirty(bp);
 
 	bp->b_flags &= ~B_DONE;
@@ -938,7 +950,6 @@ bufwrite(struct buf *bp)
 	bp->b_flags |= B_CACHE;
 	bp->b_iocmd = BIO_WRITE;
 
-	bufobj_wref(bp->b_bufobj);
 	vfs_busy_pages(bp, 1);
 
 	/*
@@ -1033,6 +1044,8 @@ bdwrite(struct buf *bp)
 
 	CTR3(KTR_BUF, "bdwrite(%p) vp %p flags %X", bp, bp->b_vp, bp->b_flags);
 	KASSERT(bp->b_bufobj != NULL, ("No b_bufobj %p", bp));
+	KASSERT((bp->b_flags & B_BARRIER) == 0,
+	    ("Barrier request in delayed write %p", bp));
 	BUF_ASSERT_HELD(bp);
 
 	if (bp->b_flags & B_INVAL) {
@@ -1190,6 +1203,40 @@ bawrite(struct buf *bp)
 
 	bp->b_flags |= B_ASYNC;
 	(void) bwrite(bp);
+}
+
+/*
+ *	babarrierwrite:
+ *
+ *	Asynchronous barrier write.  Start output on a buffer, but do not
+ *	wait for it to complete.  Place a write barrier after this write so
+ *	that this buffer and all buffers written before it are committed to
+ *	the disk before any buffers written after this write are committed
+ *	to the disk.  The buffer is released when the output completes.
+ */
+void
+babarrierwrite(struct buf *bp)
+{
+
+	bp->b_flags |= B_ASYNC | B_BARRIER;
+	(void) bwrite(bp);
+}
+
+/*
+ *	bbarrierwrite:
+ *
+ *	Synchronous barrier write.  Start output on a buffer and wait for
+ *	it to complete.  Place a write barrier after this write so that
+ *	this buffer and all buffers written before it are committed to 
+ *	the disk before any buffers written after this write are committed
+ *	to the disk.  The buffer is released when the output completes.
+ */
+int
+bbarrierwrite(struct buf *bp)
+{
+
+	bp->b_flags |= B_BARRIER;
+	return (bwrite(bp));
 }
 
 /*
@@ -3709,8 +3756,7 @@ vfs_bio_set_valid(struct buf *bp, int base, int size)
 void
 vfs_bio_clrbuf(struct buf *bp) 
 {
-	int i, j, mask;
-	caddr_t sa, ea;
+	int i, j, mask, sa, ea, slide;
 
 	if ((bp->b_flags & (B_VMIO | B_MALLOC)) != B_VMIO) {
 		clrbuf(bp);
@@ -3728,30 +3774,33 @@ vfs_bio_clrbuf(struct buf *bp)
 		if ((bp->b_pages[0]->valid & mask) == mask)
 			goto unlock;
 		if ((bp->b_pages[0]->valid & mask) == 0) {
-			bzero(bp->b_data, bp->b_bufsize);
+			pmap_zero_page_area(bp->b_pages[0], 0, bp->b_bufsize);
 			bp->b_pages[0]->valid |= mask;
 			goto unlock;
 		}
 	}
-	ea = sa = bp->b_data;
-	for(i = 0; i < bp->b_npages; i++, sa = ea) {
-		ea = (caddr_t)trunc_page((vm_offset_t)sa + PAGE_SIZE);
-		ea = (caddr_t)(vm_offset_t)ulmin(
-		    (u_long)(vm_offset_t)ea,
-		    (u_long)(vm_offset_t)bp->b_data + bp->b_bufsize);
+	sa = bp->b_offset & PAGE_MASK;
+	slide = 0;
+	for (i = 0; i < bp->b_npages; i++, sa = 0) {
+		slide = imin(slide + PAGE_SIZE, bp->b_offset + bp->b_bufsize);
+		ea = slide & PAGE_MASK;
+		if (ea == 0)
+			ea = PAGE_SIZE;
 		if (bp->b_pages[i] == bogus_page)
 			continue;
-		j = ((vm_offset_t)sa & PAGE_MASK) / DEV_BSIZE;
+		j = sa / DEV_BSIZE;
 		mask = ((1 << ((ea - sa) / DEV_BSIZE)) - 1) << j;
 		VM_OBJECT_LOCK_ASSERT(bp->b_pages[i]->object, MA_OWNED);
 		if ((bp->b_pages[i]->valid & mask) == mask)
 			continue;
 		if ((bp->b_pages[i]->valid & mask) == 0)
-			bzero(sa, ea - sa);
+			pmap_zero_page_area(bp->b_pages[i], sa, ea - sa);
 		else {
 			for (; sa < ea; sa += DEV_BSIZE, j++) {
-				if ((bp->b_pages[i]->valid & (1 << j)) == 0)
-					bzero(sa, DEV_BSIZE);
+				if ((bp->b_pages[i]->valid & (1 << j)) == 0) {
+					pmap_zero_page_area(bp->b_pages[i],
+					    sa, DEV_BSIZE);
+				}
 			}
 		}
 		bp->b_pages[i]->valid |= mask;
