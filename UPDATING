@@ -11,6 +11,13 @@ handbook:
 Items affecting the ports and packages system can be found in
 /usr/ports/UPDATING.  Please read that file before running portupgrade.
 
+20130524:
+	`list' command has been added to hastctl(8).  For now, it is full
+	equivalent of `status' command.
+	WARNING: in the near future the output of hastctl's status command
+	will change to more terse format.  If you use `hastctl status'
+	for parsing in your scripts, switch to `hastctl list'.
+
 20130430:
 	The mergemaster command now uses the default MAKEOBJDIRPREFIX
 	rather than creating it's own in the temporary directory in
@@ -24,7 +31,7 @@ Items affecting the ports and packages system can be found in
 	Due to the use of the new -l option to install(1) during build
 	and install, you must take care not to directly set the INSTALL
 	make variable in your /etc/make.conf, /etc/src.conf, or on the
-	command line.  If you with to use the -C flag for all installs
+	command line.  If you wish to use the -C flag for all installs
 	you may be able to add INSTALL+=-C to /etc/make.conf or
 	/etc/src.conf.
 
@@ -68,8 +75,8 @@ Items affecting the ports and packages system can be found in
 	pools. The first two read-only compatible "feature flags" for ZFS
 	pools are "com.delphix:async_destroy" and "com.delphix:empty_bpobj".
 	For more information read the new zpool-features(7) manual page.
-        Please refer to the "ZFS notes" section of this file for information
-        on upgrading boot ZFS pools.
+	Please refer to the "ZFS notes" section of this file for information
+	on upgrading boot ZFS pools.
 
 20121114:
 	The commit introducing bsd.compiler.mk breaks the traditional
