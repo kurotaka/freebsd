@@ -678,6 +678,7 @@ vendor ASUS2		0x1761	ASUS
 vendor SWEEX2		0x177f	Sweex
 vendor METAGEEK		0x1781	MetaGeek
 vendor KAMSTRUP		0x17a8	Kamstrup A/S
+vendor LENOVO		0x17ef	Lenovo
 vendor WAVESENSE	0x17f4	WaveSense
 vendor VAISALA		0x1843	Vaisala
 vendor AMIT		0x18c5	AMIT
@@ -1081,6 +1082,7 @@ product APPLE IPOD_TOUCH	0x1291	iPod Touch
 product APPLE IPHONE_3G		0x1292	iPhone 3G
 product APPLE IPHONE_3GS	0x1294	iPhone 3GS
 product APPLE IPHONE_4		0x1297	iPhone 4
+product APPLE IPHONE_4S		0x12a0	iPhone 4S
 product APPLE IPHONE_5		0x12a8  iPhone 5
 product APPLE IPAD		0x129a	iPad
 product APPLE ETHERNET		0x1402	Ethernet A1277
@@ -2418,6 +2420,9 @@ product LARSENBRUSGAARD ALTITRACK	0x0001	FTDI compatible adapter
 
 /* Leadtek products */
 product LEADTEK 9531		0x2101	9531 GPS
+
+/* Lenovo products */
+product LENOVO ETHERNET		0x7203	USB 2.0 Ethernet
 
 /* Lexar products */
 product LEXAR JUMPSHOT		0x0001	jumpSHOT CompactFlash Reader

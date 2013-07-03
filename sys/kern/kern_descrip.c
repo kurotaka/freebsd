@@ -55,6 +55,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/filio.h>
 #include <sys/jail.h>
 #include <sys/kernel.h>
+#include <sys/ksem.h>
 #include <sys/limits.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -110,6 +111,7 @@ MALLOC_DECLARE(M_FADVISE);
 
 static uma_zone_t file_zone;
 
+void	(*ksem_info)(struct ksem *ks, char *path, size_t size, uint32_t *value);
 
 /* Flags for do_dup() */
 #define DUP_FIXED	0x1	/* Force fixed allocation */
@@ -129,6 +131,7 @@ static int	fill_pts_info(struct tty *tp, struct kinfo_file *kif);
 static int	fill_pipe_info(struct pipe *pi, struct kinfo_file *kif);
 static int	fill_procdesc_info(struct procdesc *pdp,
     struct kinfo_file *kif);
+static int	fill_sem_info(struct file *fp, struct kinfo_file *kif);
 static int	fill_shm_info(struct file *fp, struct kinfo_file *kif);
 
 /*
@@ -1585,6 +1588,34 @@ fdalloc(struct thread *td, int minfd, int *result)
 }
 
 /*
+ * Allocate n file descriptors for the process.
+ */
+int
+fdallocn(struct thread *td, int minfd, int *fds, int n)
+{
+	struct proc *p = td->td_proc;
+	struct filedesc *fdp = p->p_fd;
+	int i;
+
+	FILEDESC_XLOCK_ASSERT(fdp);
+
+	if (!fdavail(td, n))
+		return (EMFILE);
+
+	for (i = 0; i < n; i++)
+		if (fdalloc(td, 0, &fds[i]) != 0)
+			break;
+
+	if (i < n) {
+		for (i--; i >= 0; i--)
+			fdunused(fdp, fds[i]);
+		return (EMFILE);
+	}
+
+	return (0);
+}
+
+/*
  * Check to see whether n user file descriptors are available to the process
  * p.
  */
@@ -3008,6 +3039,7 @@ sysctl_kern_proc_ofiledesc(SYSCTL_HANDLER_ARGS)
 	struct shmfd *shmfd;
 	struct socket *so;
 	struct vnode *vp;
+	struct ksem *ks;
 	struct file *fp;
 	struct proc *p;
 	struct tty *tp;
@@ -3037,6 +3069,7 @@ sysctl_kern_proc_ofiledesc(SYSCTL_HANDLER_ARGS)
 			continue;
 		bzero(kif, sizeof(*kif));
 		kif->kf_structsize = sizeof(*kif);
+		ks = NULL;
 		vp = NULL;
 		so = NULL;
 		tp = NULL;
@@ -3097,6 +3130,7 @@ sysctl_kern_proc_ofiledesc(SYSCTL_HANDLER_ARGS)
 
 		case DTYPE_SEM:
 			kif->kf_type = KF_TYPE_SEM;
+			ks = fp->f_data;
 			break;
 
 		case DTYPE_PTS:
@@ -3208,6 +3242,8 @@ sysctl_kern_proc_ofiledesc(SYSCTL_HANDLER_ARGS)
 		}
 		if (shmfd != NULL)
 			shm_path(shmfd, kif->kf_path, sizeof(kif->kf_path));
+		if (ks != NULL && ksem_info != NULL)
+			ksem_info(ks, kif->kf_path, sizeof(kif->kf_path), NULL);
 		error = SYSCTL_OUT(req, kif, sizeof(*kif));
 		if (error)
 			break;
@@ -3279,6 +3315,9 @@ export_fd_to_sb(void *data, int type, int fd, int fflags, int refcnt,
 		break;
 	case KF_TYPE_PROCDESC:
 		error = fill_procdesc_info((struct procdesc *)data, kif);
+		break;
+	case KF_TYPE_SEM:
+		error = fill_sem_info((struct file *)data, kif);
 		break;
 	case KF_TYPE_SHM:
 		error = fill_shm_info((struct file *)data, kif);
@@ -3463,6 +3502,7 @@ kern_proc_filedesc_out(struct proc *p,  struct sbuf *sb, ssize_t maxlen)
 
 		case DTYPE_SEM:
 			type = KF_TYPE_SEM;
+			data = fp;
 			break;
 
 		case DTYPE_PTS:
@@ -3695,6 +3735,25 @@ fill_procdesc_info(struct procdesc *pdp, struct kinfo_file *kif)
 	if (pdp == NULL)
 		return (1);
 	kif->kf_un.kf_proc.kf_pid = pdp->pd_pid;
+	return (0);
+}
+
+static int
+fill_sem_info(struct file *fp, struct kinfo_file *kif)
+{
+	struct thread *td;
+	struct stat sb;
+
+	td = curthread;
+	if (fp->f_data == NULL)
+		return (1);
+	if (fo_stat(fp, &sb, td->td_ucred, td) != 0)
+		return (1);
+	if (ksem_info == NULL)
+		return (1);
+	ksem_info(fp->f_data, kif->kf_path, sizeof(kif->kf_path),
+	    &kif->kf_un.kf_sem.kf_sem_value);
+	kif->kf_un.kf_sem.kf_sem_mode = sb.st_mode;
 	return (0);
 }
 
