@@ -134,7 +134,9 @@ OLD_FILES+=usr/share/man/man8/auditd.8.gz
 
 .if ${MK_AUTHPF} == no
 OLD_FILES+=usr/sbin/authpf
+OLD_FILES+=usr/sbin/authpf-noip
 OLD_FILES+=usr/share/man/man8/authpf.8.gz
+OLD_FILES+=usr/share/man/man8/authpf-noip.8.gz
 .endif
 
 .if ${MK_BIND} == no
@@ -714,6 +716,38 @@ OLD_FILES+=usr/include/clang/3.2/x86intrin.h
 OLD_FILES+=usr/include/clang/3.2/xmmintrin.h
 OLD_FILES+=usr/include/clang/3.2/xopintrin.h
 OLD_DIRS+=usr/include/clang/3.2
+OLD_FILES+=usr/include/clang/3.3/__wmmintrin_aes.h
+OLD_FILES+=usr/include/clang/3.3/__wmmintrin_pclmul.h
+OLD_FILES+=usr/include/clang/3.3/altivec.h
+OLD_FILES+=usr/include/clang/3.3/ammintrin.h
+OLD_FILES+=usr/include/clang/3.3/avx2intrin.h
+OLD_FILES+=usr/include/clang/3.3/avxintrin.h
+OLD_FILES+=usr/include/clang/3.3/bmi2intrin.h
+OLD_FILES+=usr/include/clang/3.3/bmiintrin.h
+OLD_FILES+=usr/include/clang/3.3/cpuid.h
+OLD_FILES+=usr/include/clang/3.3/emmintrin.h
+OLD_FILES+=usr/include/clang/3.3/f16cintrin.h
+OLD_FILES+=usr/include/clang/3.3/fma4intrin.h
+OLD_FILES+=usr/include/clang/3.3/fmaintrin.h
+OLD_FILES+=usr/include/clang/3.3/immintrin.h
+OLD_FILES+=usr/include/clang/3.3/lzcntintrin.h
+OLD_FILES+=usr/include/clang/3.3/mm3dnow.h
+OLD_FILES+=usr/include/clang/3.3/mm_malloc.h
+OLD_FILES+=usr/include/clang/3.3/mmintrin.h
+OLD_FILES+=usr/include/clang/3.3/module.map
+OLD_FILES+=usr/include/clang/3.3/nmmintrin.h
+OLD_FILES+=usr/include/clang/3.3/pmmintrin.h
+OLD_FILES+=usr/include/clang/3.3/popcntintrin.h
+OLD_FILES+=usr/include/clang/3.3/prfchwintrin.h
+OLD_FILES+=usr/include/clang/3.3/rdseedintrin.h
+OLD_FILES+=usr/include/clang/3.3/rtmintrin.h
+OLD_FILES+=usr/include/clang/3.3/smmintrin.h
+OLD_FILES+=usr/include/clang/3.3/tmmintrin.h
+OLD_FILES+=usr/include/clang/3.3/wmmintrin.h
+OLD_FILES+=usr/include/clang/3.3/x86intrin.h
+OLD_FILES+=usr/include/clang/3.3/xmmintrin.h
+OLD_FILES+=usr/include/clang/3.3/xopintrin.h
+OLD_DIRS+=usr/include/clang/3.3
 OLD_DIRS+=usr/include/clang
 OLD_FILES+=usr/share/doc/llvm/clang/LICENSE.TXT
 OLD_DIRS+=usr/share/doc/llvm/clang

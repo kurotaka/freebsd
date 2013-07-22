@@ -43,6 +43,11 @@
 # LIBMODE	Library mode. [${NOBINMODE}]
 #
 #
+# DEBUGDIR	Base path for standalone debug files. [/usr/lib/debug]
+#
+# DEBUGMODE	Mode for debug files. [${NOBINMODE}]
+#
+#
 # KMODDIR	Base path for loadable kernel modules
 #		(see kld(4)). [/boot/kernel]
 #
@@ -147,6 +152,9 @@ LIBOWN?=	${BINOWN}
 LIBGRP?=	${BINGRP}
 LIBMODE?=	${NOBINMODE}
 
+DEBUGDIR?=	/usr/lib/debug
+DEBUGMODE?=	${NOBINMODE}
+
 
 # Share files
 SHAREDIR?=	/usr/share
@@ -213,6 +221,7 @@ COMPRESS_EXT?=	.gz
 #
 .for var in \
     CTF \
+    DEBUG_FILES \
     INSTALLLIB \
     MAN \
     PROFILE
@@ -434,10 +443,10 @@ __DEFAULT_NO_OPTIONS = \
     CLANG_EXTRAS \
     CLANG_IS_CC \
     CTF \
+    DEBUG_FILES \
     HESIOD \
     ICONV \
     IDEA \
-    LIBCPLUSPLUS \
     NMTREE \
     OFED \
     OPENSSH_NONE_CIPHER \
@@ -593,10 +602,6 @@ MK_CLANG_FULL:= no
 MK_CLANG_IS_CC:= no
 .endif
 
-MK_LIBCPLUSPLUS?= no
-
-MK_LIBCPLUSPLUS?= no
-
 #
 # Set defaults for the MK_*_SUPPORT variables.
 #
@@ -647,6 +652,33 @@ MK_${vv:H}:=	yes
 MK_${vv:H}:=	no
 .else
 MK_${vv:H}:=	${MK_${vv:T}}
+.endif
+.endfor
+
+#
+# MK_* options that default to "yes" if the compiler is a C++11 compiler.
+#
+.include <bsd.compiler.mk>
+.for var in \
+    LIBCPLUSPLUS
+.if defined(WITH_${var}) && defined(WITHOUT_${var})
+.error WITH_${var} and WITHOUT_${var} can't both be set.
+.endif
+.if defined(MK_${var})
+.error MK_${var} can't be set by a user.
+.endif
+.if ${COMPILER_FEATURES:Mc++11}
+.if defined(WITHOUT_${var})
+MK_${var}:=	no
+.else
+MK_${var}:=	yes
+.endif
+.else
+.if defined(WITH_${var})
+MK_${var}:=	yes
+.else
+MK_${var}:=	no
+.endif
 .endif
 .endfor
 

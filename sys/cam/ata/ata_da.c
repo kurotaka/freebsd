@@ -398,6 +398,14 @@ static struct ada_quirk_entry ada_quirk_table[] =
 	},
 	{
 		/*
+		 * OCZ Vertex 4 SSDs
+		 * 4k optimised & trim only works in 4k requests + 4k aligned
+		 */
+		{ T_DIRECT, SIP_MEDIA_FIXED, "*", "OCZ-VERTEX4*", "*" },
+		/*quirks*/ADA_Q_4K
+	},
+	{
+		/*
 		 * Samsung 830 Series SSDs
 		 * 4k optimised
 		 */
@@ -1239,10 +1247,15 @@ adaregister(struct cam_periph *periph, void *arg)
 		softc->disk->d_flags |= DISKFLAG_CANFLUSHCACHE;
 	if (softc->flags & ADA_FLAG_CAN_TRIM) {
 		softc->disk->d_flags |= DISKFLAG_CANDELETE;
+		softc->disk->d_delmaxsize = softc->params.secsize *
+					    ATA_DSM_RANGE_MAX *
+					    softc->trim_max_ranges;
 	} else if ((softc->flags & ADA_FLAG_CAN_CFA) &&
 	    !(softc->flags & ADA_FLAG_CAN_48BIT)) {
 		softc->disk->d_flags |= DISKFLAG_CANDELETE;
-	}
+		softc->disk->d_delmaxsize = 256 * softc->params.secsize;
+	} else
+		softc->disk->d_delmaxsize = maxio;
 	if ((cpi.hba_misc & PIM_UNMAPPED) != 0)
 		softc->disk->d_flags |= DISKFLAG_UNMAPPED_BIO;
 	strlcpy(softc->disk->d_descr, cgd->ident_data.model,

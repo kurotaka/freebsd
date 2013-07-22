@@ -2487,6 +2487,7 @@ ciss_preen_command(struct ciss_request *cr)
     cc->header.sg_total = 0;
     cc->header.host_tag = cr->cr_tag << 2;
     cc->header.host_tag_zeroes = 0;
+    bzero(&(cc->sg[0]), CISS_COMMAND_ALLOC_SIZE - sizeof(struct ciss_command));
     cmdphys = cr->cr_ccphys;
     cc->error_info.error_info_address = cmdphys + sizeof(struct ciss_command);
     cc->error_info.error_info_length = CISS_COMMAND_ALLOC_SIZE - sizeof(struct ciss_command);
@@ -2913,7 +2914,7 @@ ciss_cam_rescan_target(struct ciss_softc *sc, int bus, int target)
 	return;
     }
 
-    if (xpt_create_path(&ccb->ccb_h.path, xpt_periph,
+    if (xpt_create_path(&ccb->ccb_h.path, NULL,
 	    cam_sim_path(sc->ciss_cam_sim[bus]),
 	    target, CAM_LUN_WILDCARD) != CAM_REQ_CMP) {
 	ciss_printf(sc, "rescan failed (can't create path)\n");
@@ -2985,6 +2986,7 @@ ciss_cam_action(struct cam_sim *sim, union ccb *ccb)
     case XPT_PATH_INQ:
     {
 	struct ccb_pathinq	*cpi = &ccb->cpi;
+	int			sg_length;
 
 	debug(1, "XPT_PATH_INQ %d:%d:%d", cam_sim_bus(sim), ccb->ccb_h.target_id, ccb->ccb_h.target_lun);
 
@@ -3005,7 +3007,22 @@ ciss_cam_action(struct cam_sim *sim, union ccb *ccb)
 	cpi->transport_version = 2;
 	cpi->protocol = PROTO_SCSI;
 	cpi->protocol_version = SCSI_REV_2;
-	cpi->maxio = (CISS_MAX_SG_ELEMENTS - 1) * PAGE_SIZE;
+	if (sc->ciss_cfg->max_sg_length == 0) {
+		sg_length = 17;
+	} else {
+	/* XXX Fix for ZMR cards that advertise max_sg_length == 32
+	 * Confusing bit here. max_sg_length is usually a power of 2. We always
+	 * need to subtract 1 to account for partial pages. Then we need to 
+	 * align on a valid PAGE_SIZE so we round down to the nearest power of 2. 
+	 * Add 1 so we can then subtract it out in the assignment to maxio.
+	 * The reason for all these shenanigans is to create a maxio value that
+	 * creates IO operations to volumes that yield consistent operations
+	 * with good performance.
+	 */
+		sg_length = sc->ciss_cfg->max_sg_length - 1;
+		sg_length = (1 << (fls(sg_length) - 1)) + 1;
+	}
+	cpi->maxio = (min(CISS_MAX_SG_ELEMENTS, sg_length) - 1) * PAGE_SIZE;
 	ccb->ccb_h.status = CAM_REQ_CMP;
 	break;
     }

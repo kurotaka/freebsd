@@ -184,13 +184,25 @@ nd6_ifattach(struct ifnet *ifp)
 
 	nd->flags = ND6_IFF_PERFORMNUD;
 
-	/* A loopback interface always has ND6_IFF_AUTO_LINKLOCAL. */
-	if (V_ip6_auto_linklocal || (ifp->if_flags & IFF_LOOPBACK))
+	/* A loopback interface always has ND6_IFF_AUTO_LINKLOCAL.
+	 * XXXHRS: Clear ND6_IFF_AUTO_LINKLOCAL on an IFT_BRIDGE interface by
+	 * default regardless of the V_ip6_auto_linklocal configuration to
+	 * give a reasonable default behavior.
+	 */
+	if ((V_ip6_auto_linklocal && ifp->if_type != IFT_BRIDGE) ||
+	    (ifp->if_flags & IFF_LOOPBACK))
 		nd->flags |= ND6_IFF_AUTO_LINKLOCAL;
-
-	/* A loopback interface does not need to accept RTADV. */
-	if (V_ip6_accept_rtadv && !(ifp->if_flags & IFF_LOOPBACK))
-		nd->flags |= ND6_IFF_ACCEPT_RTADV;
+	/*
+	 * A loopback interface does not need to accept RTADV.
+	 * XXXHRS: Clear ND6_IFF_ACCEPT_RTADV on an IFT_BRIDGE interface by
+	 * default regardless of the V_ip6_accept_rtadv configuration to
+	 * prevent the interface from accepting RA messages arrived
+	 * on one of the member interfaces with ND6_IFF_ACCEPT_RTADV.
+	 */
+	if (V_ip6_accept_rtadv &&
+	    !(ifp->if_flags & IFF_LOOPBACK) &&
+	    (ifp->if_type != IFT_BRIDGE))
+			nd->flags |= ND6_IFF_ACCEPT_RTADV;
 	if (V_ip6_no_radr && !(ifp->if_flags & IFF_LOOPBACK))
 		nd->flags |= ND6_IFF_NO_RADR;
 
@@ -509,6 +521,7 @@ nd6_llinfo_timer(void *arg)
 				ln->la_hold = m0;
 				clear_llinfo_pqueue(ln);
 			}
+			EVENTHANDLER_INVOKE(lle_event, ln, LLENTRY_TIMEDOUT);
 			(void)nd6_free(ln, 0);
 			ln = NULL;
 			if (m != NULL)
@@ -526,6 +539,7 @@ nd6_llinfo_timer(void *arg)
 	case ND6_LLINFO_STALE:
 		/* Garbage Collection(RFC 2461 5.3) */
 		if (!ND6_LLINFO_PERMANENT(ln)) {
+			EVENTHANDLER_INVOKE(lle_event, ln, LLENTRY_EXPIRED);
 			(void)nd6_free(ln, 1);
 			ln = NULL;
 		}
@@ -553,6 +567,7 @@ nd6_llinfo_timer(void *arg)
 			nd6_ns_output(ifp, dst, dst, ln, 0);
 			LLE_WLOCK(ln);
 		} else {
+			EVENTHANDLER_INVOKE(lle_event, ln, LLENTRY_EXPIRED);
 			(void)nd6_free(ln, 0);
 			ln = NULL;
 		}
@@ -1357,16 +1372,6 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 		struct ifaddr *ifa;
 		struct in6_ifaddr *ia;
 
-		/*
-		 * Try to clear ifdisabled flag when enabling
-		 * accept_rtadv or auto_linklocal.
-		 */
-		if ((ND_IFINFO(ifp)->flags & ND6_IFF_IFDISABLED) &&
-		    !(ND.flags & ND6_IFF_IFDISABLED) &&
-		    (ND.flags & (ND6_IFF_ACCEPT_RTADV |
-		    ND6_IFF_AUTO_LINKLOCAL)))
-			ND.flags &= ~ND6_IFF_IFDISABLED;
-
 		if ((ND_IFINFO(ifp)->flags & ND6_IFF_IFDISABLED) &&
 		    !(ND.flags & ND6_IFF_IFDISABLED)) {
 			/* ifdisabled 1->0 transision */
@@ -1636,6 +1641,7 @@ nd6_cache_lladdr(struct ifnet *ifp, struct in6_addr *from, char *lladdr,
 		 */
 		bcopy(lladdr, &ln->ll_addr, ifp->if_addrlen);
 		ln->la_flags |= LLE_VALID;
+		EVENTHANDLER_INVOKE(lle_event, ln, LLENTRY_RESOLVED);
 	}
 
 	if (!is_newentry) {
@@ -2204,7 +2210,7 @@ nd6_storelladdr(struct ifnet *ifp, struct mbuf *m,
 
 	*lle = NULL;
 	IF_AFDATA_UNLOCK_ASSERT(ifp);
-	if (m->m_flags & M_MCAST) {
+	if (m != NULL && m->m_flags & M_MCAST) {
 		int i;
 
 		switch (ifp->if_type) {

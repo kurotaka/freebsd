@@ -1,5 +1,5 @@
 /*-
- * Copyright (C) 2012 Intel Corporation
+ * Copyright (C) 2012-2013 Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,6 +33,8 @@
 #include <sys/types.h>
 #endif
 
+#include <sys/param.h>
+
 #define	NVME_PASSTHROUGH_CMD		_IOWR('n', 0, struct nvme_pt_command)
 #define	NVME_RESET_CONTROLLER		_IO('n', 1)
 
@@ -44,6 +46,8 @@
  *  log pages.
  */
 #define NVME_GLOBAL_NAMESPACE_TAG	((uint32_t)0xFFFFFFFF)
+
+#define NVME_MAX_XFER_SIZE		MAXPHYS
 
 union cap_lo_register {
 	uint32_t	raw;
@@ -377,6 +381,12 @@ enum nvme_dsm_attribute {
 	NVME_DSM_ATTR_INTEGRAL_READ		= 0x1,
 	NVME_DSM_ATTR_INTEGRAL_WRITE		= 0x2,
 	NVME_DSM_ATTR_DEALLOCATE		= 0x4,
+};
+
+enum nvme_activate_action {
+	NVME_AA_REPLACE_NO_ACTIVATE		= 0x0,
+	NVME_AA_REPLACE_ACTIVATE		= 0x1,
+	NVME_AA_ACTIVATE			= 0x2,
 };
 
 struct nvme_controller_data {
@@ -755,10 +765,10 @@ struct nvme_pt_command {
 
 	/*
 	 * is_read = 1 if the passthrough command will read data into the
-	 *  supplied buffer.
+	 *  supplied buffer from the controller.
 	 *
-	 * is_read = 0 if the passthrough command will write data into the
-	 *  supplied buffer.
+	 * is_read = 0 if the passthrough command will write data from the
+	 *  supplied buffer to the controller.
 	 */
 	uint32_t		is_read;
 

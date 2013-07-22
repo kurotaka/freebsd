@@ -268,6 +268,13 @@ WMAKEENV=	${CROSSENV} \
 		VERSION="${VERSION}" \
 		INSTALL="sh ${.CURDIR}/tools/install.sh" \
 		PATH=${TMPPATH}
+
+# make hierarchy
+HMAKE=		PATH=${TMPPATH} ${MAKE} LOCAL_MTREE=${LOCAL_MTREE}
+.if defined(NO_ROOT)
+HMAKE+=		PATH=${TMPPATH} METALOG=${METALOG} -DNO_ROOT
+.endif
+
 .if ${MK_CDDL} == "no"
 WMAKEENV+=	NO_CTF=1
 .endif
@@ -371,7 +378,7 @@ IMAKE_MTREE=	MTREE_CMD="nmtree ${MTREEFLAGS}"
 
 # kernel stage
 KMAKEENV=	${WMAKEENV}
-KMAKE=		${KMAKEENV} ${MAKE} ${KERNEL_FLAGS} KERNEL=${INSTKERNNAME}
+KMAKE=		${KMAKEENV} ${MAKE} ${.MAKEFLAGS} ${KERNEL_FLAGS} KERNEL=${INSTKERNNAME}
 
 #
 # buildworld
@@ -419,6 +426,13 @@ _worldtmp:
 	mtree -deU -f ${.CURDIR}/etc/mtree/BSD.include.dist \
 	    -p ${WORLDTMP}/usr/include >/dev/null
 	ln -sf ${.CURDIR}/sys ${WORLDTMP}
+.if ${MK_DEBUG_FILES} != "no"
+	# We could instead disable debug files for these build stages
+	mtree -deU -f ${.CURDIR}/etc/mtree/BSD.debug.dist \
+	    -p ${WORLDTMP}/legacy/usr/lib >/dev/null
+	mtree -deU -f ${.CURDIR}/etc/mtree/BSD.debug.dist \
+	    -p ${WORLDTMP}/usr/lib >/dev/null
+.endif
 .if ${MK_BIND_LIBS} != "no"
 	mtree -deU -f ${.CURDIR}/etc/mtree/BIND.include.dist \
 	    -p ${WORLDTMP}/usr/include >/dev/null
@@ -504,6 +518,10 @@ build32:
 	    -p ${LIB32TMP}/usr >/dev/null
 	mtree -deU -f ${.CURDIR}/etc/mtree/BSD.include.dist \
 	    -p ${LIB32TMP}/usr/include >/dev/null
+.if ${MK_DEBUG_FILES} != "no"
+	mtree -deU -f ${.CURDIR}/etc/mtree/BSD.debug.dist \
+	    -p ${LIB32TMP}/usr/lib >/dev/null
+.endif
 	mkdir -p ${WORLDTMP}
 	ln -sf ${.CURDIR}/sys ${WORLDTMP}
 .if ${MK_KERBEROS} != "no"
@@ -733,6 +751,10 @@ distributeworld installworld: installcheck installcheck_UGID
 	    -p ${DESTDIR}/${DISTDIR}/${dist}/usr >/dev/null
 	mtree -deU -f ${.CURDIR}/etc/mtree/BSD.include.dist \
 	    -p ${DESTDIR}/${DISTDIR}/${dist}/usr/include >/dev/null
+.if ${MK_DEBUG_FILES} != "no"
+	mtree -deU -f ${.CURDIR}/etc/mtree/BSD.debug.dist \
+	    -p ${DESTDIR}/${DISTDIR}/${dist}/usr/lib >/dev/null
+.endif
 .if defined(NO_ROOT)
 	${IMAKEENV} nmtree -C -f ${.CURDIR}/etc/mtree/BSD.root.dist | \
 	    sed -e 's#^\./#./${dist}/#' >> ${METALOG}
@@ -1272,13 +1294,8 @@ cross-tools:
 #
 # hierarchy - ensure that all the needed directories are present
 #
-hierarchy:
-.if defined(NO_ROOT)
-	cd ${.CURDIR}/etc; ${MAKE} LOCAL_MTREE=${LOCAL_MTREE} \
-	    -DNO_ROOT METALOG=${METALOG} distrib-dirs
-.else
-	cd ${.CURDIR}/etc; ${MAKE} LOCAL_MTREE=${LOCAL_MTREE} distrib-dirs
-.endif
+hierarchy hier:
+	cd ${.CURDIR}/etc && ${HMAKE} distrib-dirs
 
 #
 # libraries - build all libraries, and install them under ${DESTDIR}.

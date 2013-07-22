@@ -2,6 +2,7 @@
 # $FreeBSD$
 
 MAN=	aac.4 \
+	aacraid.4 \
 	acpi.4 \
 	${_acpi_asus.4} \
 	${_acpi_dock.4} \
@@ -75,6 +76,7 @@ MAN=	aac.4 \
 	cardbus.4 \
 	carp.4 \
 	cas.4 \
+	cc_cdg.4 \
 	cc_chd.4 \
 	cc_cubic.4 \
 	cc_hd.4 \
@@ -156,6 +158,7 @@ MAN=	aac.4 \
 	${_hpt27xx.4} \
 	${_hptiop.4} \
 	${_hptmv.4} \
+	${_hptnr.4} \
 	${_hptrr.4} \
 	hwpmc.4 \
 	ichsmb.4 \
@@ -326,7 +329,9 @@ MAN=	aac.4 \
 	nmdm.4 \
 	nsp.4 \
 	null.4 \
+	${_nvd.4} \
 	${_nve.4} \
+	${_nvme.4} \
 	${_nvram.4} \
 	${_nvram2env.4} \
 	${_nxge.4} \
@@ -719,6 +724,7 @@ _dpms.4=	dpms.4
 _hpt27xx.4=	hpt27xx.4
 _hptiop.4=	hptiop.4
 _hptmv.4=	hptmv.4
+_hptnr.4=	hptnr.4
 _hptrr.4=	hptrr.4
 _i8254.4=	i8254.4
 _ichwd.4=	ichwd.4
@@ -738,7 +744,9 @@ _linux.4=	linux.4
 _ndis.4=	ndis.4
 _nfe.4=		nfe.4
 _nfsmb.4=	nfsmb.4
+_nvd.4=		nvd.4
 _nve.4=		nve.4
+_nvme.4=	nvme.4
 _nvram.4=	nvram.4
 _nxge.4=	nxge.4
 _virtio.4=	virtio.4
