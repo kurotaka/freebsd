@@ -119,6 +119,7 @@ static int root_mount_complete;
 
 /* By default wait up to 3 seconds for devices to appear. */
 static int root_mount_timeout = 3;
+TUNABLE_INT("vfs.mountroot.timeout", &root_mount_timeout);
 
 struct root_hold_token *
 root_mount_hold(const char *identifier)
@@ -709,7 +710,7 @@ parse_mount(char **conf)
 	errmsg = malloc(ERRMSGL, M_TEMP, M_WAITOK | M_ZERO);
 
 	if (vfs_byname(fs) == NULL) {
-		strlcpy(errmsg, "unknown file system", sizeof(errmsg));
+		strlcpy(errmsg, "unknown file system", ERRMSGL);
 		error = ENOENT;
 		goto out;
 	}

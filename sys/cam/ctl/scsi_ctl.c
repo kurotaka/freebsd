@@ -916,7 +916,7 @@ ctlfestart(struct cam_periph *periph, union ccb *start_ccb)
 				if (io->io_hdr.flags & CTL_FLAG_BUS_ADDR)
 					flags |= CAM_DATA_SG_PADDR;
 				else
-					flags &= ~CAM_DATA_SG;
+					flags |= CAM_DATA_SG;
 				data_ptr = (uint8_t *)cam_sglist;
 				dxfer_len = io->scsiio.kern_data_len;
 			} else {
@@ -938,6 +938,10 @@ ctlfestart(struct cam_periph *periph, union ccb *start_ccb)
 				data_ptr = sglist[*ti].addr;
 				dxfer_len = sglist[*ti].len;
 				csio->sglist_cnt = 0;
+				if (io->io_hdr.flags & CTL_FLAG_BUS_ADDR)
+					flags |= CAM_DATA_PADDR;
+				else
+					flags |= CAM_DATA_VADDR;
 				cmd_info->flags |= CTLFE_CMD_PIECEWISE;
 				(*ti)++;
 			}
@@ -962,23 +966,23 @@ ctlfestart(struct cam_periph *periph, union ccb *start_ccb)
 
 		/*
 		 * Valid combinations:
-		 *  - CAM_SEND_STATUS, SCATTER_VALID = 0, dxfer_len = 0,
+		 *  - CAM_SEND_STATUS, CAM_DATA_SG = 0, dxfer_len = 0,
 		 *    sglist_cnt = 0
-		 *  - CAM_SEND_STATUS = 0, SCATTER_VALID = 0, dxfer_len != 0,
+		 *  - CAM_SEND_STATUS = 0, CAM_DATA_SG = 0, dxfer_len != 0,
 		 *    sglist_cnt = 0 
-		 *  - CAM_SEND_STATUS = 0, SCATTER_VALID, dxfer_len != 0,
+		 *  - CAM_SEND_STATUS = 0, CAM_DATA_SG, dxfer_len != 0,
 		 *    sglist_cnt != 0
 		 */
 #ifdef CTLFEDEBUG
 		if (((flags & CAM_SEND_STATUS)
-		  && (((flags & CAM_SCATTER_VALID) != 0)
+		  && (((flags & CAM_DATA_SG) != 0)
 		   || (dxfer_len != 0)
 		   || (csio->sglist_cnt != 0)))
 		 || (((flags & CAM_SEND_STATUS) == 0)
 		  && (dxfer_len == 0))
-		 || ((flags & CAM_SCATTER_VALID)
+		 || ((flags & CAM_DATA_SG)
 		  && (csio->sglist_cnt == 0))
-		 || (((flags & CAM_SCATTER_VALID) == 0)
+		 || (((flags & CAM_DATA_SG) == 0)
 		  && (csio->sglist_cnt != 0))) {
 			printf("%s: tag %04x cdb %02x flags %#x dxfer_len "
 			       "%d sg %u\n", __func__, atio->tag_id,
