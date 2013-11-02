@@ -1008,6 +1008,14 @@ static struct da_quirk_entry da_quirk_table[] =
 	},
 	{
 		/*
+		 * Intel X25-M Series SSDs
+		 * 4k optimised & trim only works in 4k requests + 4k aligned
+		 */
+		{ T_DIRECT, SIP_MEDIA_FIXED, "ATA", "INTEL SSDSA2M*", "*" },
+		/*quirks*/DA_Q_4K
+	},
+	{
+		/*
 		 * Kingston E100 Series SSDs
 		 * 4k optimised & trim only works in 4k requests + 4k aligned
 		 */
@@ -1020,6 +1028,22 @@ static struct da_quirk_entry da_quirk_table[] =
 		 * 4k optimised & trim only works in 4k requests + 4k aligned
 		 */
 		{ T_DIRECT, SIP_MEDIA_FIXED, "ATA", "KINGSTON SH103S3*", "*" },
+		/*quirks*/DA_Q_4K
+	},
+	{
+		/*
+		 * Marvell SSDs (entry taken from OpenSolaris)
+		 * 4k optimised & trim only works in 4k requests + 4k aligned
+		 */
+		{ T_DIRECT, SIP_MEDIA_FIXED, "ATA", "MARVELL SD88SA02*", "*" },
+		/*quirks*/DA_Q_4K
+	},
+	{
+		/*
+		 * OCZ Agility 2 SSDs
+		 * 4k optimised & trim only works in 4k requests + 4k aligned
+		 */
+		{ T_DIRECT, SIP_MEDIA_FIXED, "*", "OCZ-AGILITY2*", "*" },
 		/*quirks*/DA_Q_4K
 	},
 	{
@@ -1537,9 +1561,6 @@ daoninvalidate(struct cam_periph *periph)
 	 * done cleaning up its resources.
 	 */
 	disk_gone(softc->disk);
-
-	xpt_print(periph->path, "lost device - %d outstanding, %d refs\n",
-		  softc->outstanding_cmds, periph->refcount);
 }
 
 static void
@@ -1549,7 +1570,6 @@ dacleanup(struct cam_periph *periph)
 
 	softc = (struct da_softc *)periph->softc;
 
-	xpt_print(periph->path, "removing device entry\n");
 	cam_periph_unlock(periph);
 
 	/*
@@ -2299,7 +2319,7 @@ skipstate:
 
 out:
 		/*
-		 * Block out any asyncronous callbacks
+		 * Block out any asynchronous callbacks
 		 * while we touch the pending ccb list.
 		 */
 		LIST_INSERT_HEAD(&softc->pending_ccbs,
@@ -2961,7 +2981,7 @@ dadone(struct cam_periph *periph, union ccb *done_ccb)
 		}
 
 		/*
-		 * Block out any asyncronous callbacks
+		 * Block out any asynchronous callbacks
 		 * while we touch the pending ccb list.
 		 */
 		LIST_REMOVE(&done_ccb->ccb_h, periph_links.le);
