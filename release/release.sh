@@ -78,6 +78,9 @@ TARGET_ARCH="${TARGET}"
 NODOC=
 NOPORTS=
 
+# Set to non-empty value to build dvd1.iso as part of the release.
+WITH_DVD=
+
 get_rev_branch () {
 	# Set up the OSVERSION, BRANCH, and REVISION based on the src/ tree
 	# checked out.
@@ -125,10 +128,10 @@ fi
 # instead of their values.
 DOCPORTS=
 if [ "x${NOPORTS}" != "x" ]; then
- DOCPORTS="NOPORTS=yes "
+	DOCPORTS="NOPORTS=yes "
 fi
 if [ "x${NODOC}" != "x" ]; then
- DOCPORTS="${DOCPORTS}NODOC=yes"
+	DOCPORTS="${DOCPORTS}NODOC=yes"
 fi
 
 # The aggregated build-time flags based upon variables defined within
@@ -142,12 +145,12 @@ CHROOT_DMAKEFLAGS="${CONF_FILES}"
 RELEASE_WMAKEFLAGS="${MAKE_FLAGS} ${WORLD_FLAGS} ${ARCH_FLAGS} ${CONF_FILES}"
 RELEASE_KMAKEFLAGS="${MAKE_FLAGS} ${KERNEL_FLAGS} KERNCONF=\"${KERNEL}\" ${ARCH_FLAGS} ${CONF_FILES}"
 RELEASE_RMAKEFLAGS="${ARCH_FLAGS} KERNCONF=\"${KERNEL}\" ${CONF_FILES} \
-	${DOCPORTS}"
+	${DOCPORTS} WITH_DVD=${WITH_DVD}"
 
 # Force src checkout if configured
 FORCE_SRC_KEY=
 if [ "x${SRC_FORCE_CHECKOUT}" != "x" ]; then
- FORCE_SRC_KEY="--force"
+	FORCE_SRC_KEY="--force"
 fi
 
 if [ ! ${CHROOTDIR} ]; then
@@ -174,6 +177,7 @@ fi
 
 get_rev_branch
 
+cp /etc/resolv.conf ${CHROOTDIR}/etc/resolv.conf
 cd ${CHROOTDIR}/usr/src
 make ${CHROOT_WMAKEFLAGS} buildworld
 make ${CHROOT_IMAKEFLAGS} installworld DESTDIR=${CHROOTDIR}
@@ -182,12 +186,17 @@ mount -t devfs devfs ${CHROOTDIR}/dev
 trap "umount ${CHROOTDIR}/dev" EXIT # Clean up devfs mount on exit
 
 build_doc_ports() {
+	# Run ldconfig(8) in the chroot directory so /var/run/ld-elf*.so.hints
+	# is created.  This is needed by ports-mgmt/pkg.
+	chroot ${CHROOTDIR} /etc/rc.d/ldconfig forcerestart
+
 	## Trick the ports 'run-autotools-fixup' target to do the right thing.
 	_OSVERSION=$(sysctl -n kern.osreldate)
 	if [ -d ${CHROOTDIR}/usr/doc ] && [ "x${NODOC}" = "x" ]; then
-		PBUILD_FLAGS="OSVERSION=${_OSVERSION} WITHOUT_JADETEX=yes WITHOUT_X11=yes BATCH=yes"
+		PBUILD_FLAGS="OSVERSION=${_OSVERSION} BATCH=yes"
+		PBUILD_FLAGS="${PBUILD_FLAGS}"
 		chroot ${CHROOTDIR} make -C /usr/ports/textproc/docproj \
-			${PBUILD_FLAGS} install clean distclean
+			${PBUILD_FLAGS} OPTIONS_UNSET="FOP IGOR" install clean distclean
 	fi
 }
 
@@ -203,7 +212,6 @@ if [ -e ${SRC_CONF} ] && [ ! -c ${SRC_CONF} ]; then
 fi
 
 if [ -d ${CHROOTDIR}/usr/ports ]; then
-	cp /etc/resolv.conf ${CHROOTDIR}/etc/resolv.conf
 	build_doc_ports ${CHROOTDIR}
 fi
 

@@ -1444,19 +1444,34 @@ vm_map_find(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 	    vm_size_t length, int find_space, vm_prot_t prot,
 	    vm_prot_t max, int cow)
 {
-	vm_offset_t start;
+	vm_offset_t alignment, initial_addr, start;
 	int result;
 
-	start = *addr;
+	if (find_space == VMFS_OPTIMAL_SPACE && (object == NULL ||
+	    (object->flags & OBJ_COLORED) == 0))
+		find_space = VMFS_ANY_SPACE;
+	if (find_space >> 8 != 0) {
+		KASSERT((find_space & 0xff) == 0, ("bad VMFS flags"));
+		alignment = (vm_offset_t)1 << (find_space >> 8);
+	} else
+		alignment = 0;
+	initial_addr = *addr;
+again:
+	start = initial_addr;
 	vm_map_lock(map);
 	do {
 		if (find_space != VMFS_NO_SPACE) {
 			if (vm_map_findspace(map, start, length, addr)) {
 				vm_map_unlock(map);
+				if (find_space == VMFS_OPTIMAL_SPACE) {
+					find_space = VMFS_ANY_SPACE;
+					goto again;
+				}
 				return (KERN_NO_SPACE);
 			}
 			switch (find_space) {
-			case VMFS_ALIGNED_SPACE:
+			case VMFS_SUPER_SPACE:
+			case VMFS_OPTIMAL_SPACE:
 				pmap_align_superpage(object, offset, addr,
 				    length);
 				break;
@@ -1465,7 +1480,13 @@ vm_map_find(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 				pmap_align_tlb(addr);
 				break;
 #endif
+			case VMFS_ANY_SPACE:
+				break;
 			default:
+				if ((*addr & (alignment - 1)) != 0) {
+					*addr &= ~(alignment - 1);
+					*addr += alignment;
+				}
 				break;
 			}
 
@@ -1473,11 +1494,8 @@ vm_map_find(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 		}
 		result = vm_map_insert(map, object, offset, start, start +
 		    length, prot, max, cow);
-	} while (result == KERN_NO_SPACE && (find_space == VMFS_ALIGNED_SPACE
-#ifdef VMFS_TLB_ALIGNED_SPACE
-	    || find_space == VMFS_TLB_ALIGNED_SPACE
-#endif
-	    ));
+	} while (result == KERN_NO_SPACE && find_space != VMFS_NO_SPACE &&
+	    find_space != VMFS_ANY_SPACE);
 	vm_map_unlock(map);
 	return (result);
 }
@@ -1876,6 +1894,9 @@ vm_map_protect(vm_map_t map, vm_offset_t start, vm_offset_t end,
 	struct ucred *cred;
 	vm_prot_t old_prot;
 
+	if (start == end)
+		return (KERN_SUCCESS);
+
 	vm_map_lock(map);
 
 	VM_MAP_RANGE_CHECK(map, start, end);
@@ -2030,12 +2051,16 @@ vm_map_madvise(
 	case MADV_AUTOSYNC:
 	case MADV_NOCORE:
 	case MADV_CORE:
+		if (start == end)
+			return (KERN_SUCCESS);
 		modify_map = 1;
 		vm_map_lock(map);
 		break;
 	case MADV_WILLNEED:
 	case MADV_DONTNEED:
 	case MADV_FREE:
+		if (start == end)
+			return (KERN_SUCCESS);
 		vm_map_lock_read(map);
 		break;
 	default:
@@ -2173,6 +2198,8 @@ vm_map_inherit(vm_map_t map, vm_offset_t start, vm_offset_t end,
 	default:
 		return (KERN_INVALID_ARGUMENT);
 	}
+	if (start == end)
+		return (KERN_SUCCESS);
 	vm_map_lock(map);
 	VM_MAP_RANGE_CHECK(map, start, end);
 	if (vm_map_lookup_entry(map, start, &temp_entry)) {
@@ -2205,6 +2232,8 @@ vm_map_unwire(vm_map_t map, vm_offset_t start, vm_offset_t end,
 	int rv;
 	boolean_t need_wakeup, result, user_unwire;
 
+	if (start == end)
+		return (KERN_SUCCESS);
 	user_unwire = (flags & VM_MAP_WIRE_USER) ? TRUE : FALSE;
 	vm_map_lock(map);
 	VM_MAP_RANGE_CHECK(map, start, end);
@@ -2271,6 +2300,9 @@ vm_map_unwire(vm_map_t map, vm_offset_t start, vm_offset_t end,
 		 * Mark the entry in case the map lock is released.  (See
 		 * above.)
 		 */
+		KASSERT((entry->eflags & MAP_ENTRY_IN_TRANSITION) == 0 &&
+		    entry->wiring_thread == NULL,
+		    ("owned map entry %p", entry));
 		entry->eflags |= MAP_ENTRY_IN_TRANSITION;
 		entry->wiring_thread = curthread;
 		/*
@@ -2339,7 +2371,9 @@ done:
 			}
 		}
 		KASSERT((entry->eflags & MAP_ENTRY_IN_TRANSITION) != 0,
-		    ("vm_map_unwire: in-transition flag missing"));
+		    ("vm_map_unwire: in-transition flag missing %p", entry));
+		KASSERT(entry->wiring_thread == curthread,
+		    ("vm_map_unwire: alien wire %p", entry));
 		entry->eflags &= ~MAP_ENTRY_IN_TRANSITION;
 		entry->wiring_thread = NULL;
 		if (entry->eflags & MAP_ENTRY_NEEDS_WAKEUP) {
@@ -2370,6 +2404,8 @@ vm_map_wire(vm_map_t map, vm_offset_t start, vm_offset_t end,
 	boolean_t fictitious, need_wakeup, result, user_wire;
 	vm_prot_t prot;
 
+	if (start == end)
+		return (KERN_SUCCESS);
 	prot = 0;
 	if (flags & VM_MAP_WIRE_WRITE)
 		prot |= VM_PROT_WRITE;
@@ -2439,6 +2475,9 @@ vm_map_wire(vm_map_t map, vm_offset_t start, vm_offset_t end,
 		 * Mark the entry in case the map lock is released.  (See
 		 * above.)
 		 */
+		KASSERT((entry->eflags & MAP_ENTRY_IN_TRANSITION) == 0 &&
+		    entry->wiring_thread == NULL,
+		    ("owned map entry %p", entry));
 		entry->eflags |= MAP_ENTRY_IN_TRANSITION;
 		entry->wiring_thread = curthread;
 		if ((entry->protection & (VM_PROT_READ | VM_PROT_EXECUTE)) == 0
@@ -2809,6 +2848,8 @@ vm_map_delete(vm_map_t map, vm_offset_t start, vm_offset_t end)
 	vm_map_entry_t first_entry;
 
 	VM_MAP_ASSERT_LOCKED(map);
+	if (start == end)
+		return (KERN_SUCCESS);
 
 	/*
 	 * Find the start of the region, and clip it
