@@ -290,7 +290,8 @@ ext2_check_sb_compat(struct ext2fs *es, struct cdev *dev, int ronly)
 		return (1);
 	}
 	if (es->e2fs_rev > E2FS_REV0) {
-		if (es->e2fs_features_incompat & ~EXT2F_INCOMPAT_SUPP) {
+		if (es->e2fs_features_incompat & ~(EXT2F_INCOMPAT_SUPP |
+						   EXT4F_RO_INCOMPAT_SUPP)) {
 			printf(
 "WARNING: mount of %s denied due to unsupported optional features\n",
 			    devtoname(dev));
@@ -688,7 +689,7 @@ out:
 		PICKUP_GIANT();
 	}
 	if (ump) {
-	  	mtx_destroy(EXT2_MTX(ump));
+		mtx_destroy(EXT2_MTX(ump));
 		free(ump->um_e2fs->e2fs_gd, M_EXT2MNT);
 		free(ump->um_e2fs->e2fs_contigdirs, M_EXT2MNT);
 		free(ump->um_e2fs->e2fs, M_EXT2MNT);
@@ -723,8 +724,8 @@ ext2_unmount(struct mount *mp, int mntflags)
 	ronly = fs->e2fs_ronly;
 	if (ronly == 0 && ext2_cgupdate(ump, MNT_WAIT) == 0) {
 		if (fs->e2fs_wasvalid)
- 			fs->e2fs->e2fs_state |= E2FS_ISCLEAN;
- 		ext2_sbupdate(ump, MNT_WAIT);
+			fs->e2fs->e2fs_state |= E2FS_ISCLEAN;
+		ext2_sbupdate(ump, MNT_WAIT);
 	}
 
 	DROP_GIANT();
@@ -973,10 +974,10 @@ ext2_vget(struct mount *mp, ino_t ino, int flags, struct vnode **vpp)
 	 * blocks are zeroed out - ext2_balloc depends on this
 	 * although for regular files and directories only
 	 *
-	 * If EXT4_EXTENTS flag is enabled, unused blocks aren't
-	 * zeroed out because we could corrupt the extent tree.
+	 * If IN_E4EXTENTS is enabled, unused blocks are not zeroed
+	 * out because we could corrupt the extent tree.
 	 */
-	if (!(ip->i_flags & EXT4_EXTENTS) &&
+	if (!(ip->i_flag & IN_E4EXTENTS) &&
 	    (S_ISDIR(ip->i_mode) || S_ISREG(ip->i_mode))) {
 		used_blocks = (ip->i_size+fs->e2fs_bsize-1) / fs->e2fs_bsize;
 		for (i = used_blocks; i < EXT2_NDIR_BLOCKS; i++)
@@ -1006,7 +1007,7 @@ ext2_vget(struct mount *mp, ino_t ino, int flags, struct vnode **vpp)
 	 * already have one. This should only happen on old filesystems.
 	 */
 	if (ip->i_gen == 0) {
-		ip->i_gen = random() / 2 + 1;
+		ip->i_gen = random() + 1;
 		if ((vp->v_mount->mnt_flag & MNT_RDONLY) == 0)
 			ip->i_flag |= IN_MODIFIED;
 	}

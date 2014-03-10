@@ -55,6 +55,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
+#include <sys/procctl.h>
 #include <sys/reboot.h>
 #include <sys/resource.h>
 #include <sys/resourcevar.h>
@@ -2952,8 +2953,9 @@ freebsd32_posix_fallocate(struct thread *td,
     struct freebsd32_posix_fallocate_args *uap)
 {
 
-	return (kern_posix_fallocate(td, uap->fd,
-	    PAIR32TO64(off_t, uap->offset), PAIR32TO64(off_t, uap->len)));
+	td->td_retval[0] = kern_posix_fallocate(td, uap->fd,
+	    PAIR32TO64(off_t, uap->offset), PAIR32TO64(off_t, uap->len));
+	return (0);
 }
 
 int
@@ -2961,8 +2963,10 @@ freebsd32_posix_fadvise(struct thread *td,
     struct freebsd32_posix_fadvise_args *uap)
 {
 
-	return (kern_posix_fadvise(td, uap->fd, PAIR32TO64(off_t, uap->offset),
-	    PAIR32TO64(off_t, uap->len), uap->advice));
+	td->td_retval[0] = kern_posix_fadvise(td, uap->fd,
+	    PAIR32TO64(off_t, uap->offset), PAIR32TO64(off_t, uap->len),
+	    uap->advice);
+	return (0);
 }
 
 int
@@ -2989,4 +2993,24 @@ convert_sigevent32(struct sigevent32 *sig32, struct sigevent *sig)
 		return (EINVAL);
 	}
 	return (0);
+}
+
+int
+freebsd32_procctl(struct thread *td, struct freebsd32_procctl_args *uap)
+{
+	void *data;
+	int error, flags;
+
+	switch (uap->com) {
+	case PROC_SPROTECT:
+		error = copyin(PTRIN(uap->data), &flags, sizeof(flags));
+		if (error)
+			return (error);
+		data = &flags;
+		break;
+	default:
+		return (EINVAL);
+	}
+	return (kern_procctl(td, uap->idtype, PAIR32TO64(id_t, uap->id),
+	    uap->com, data));
 }

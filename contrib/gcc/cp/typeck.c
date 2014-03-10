@@ -1358,7 +1358,10 @@ cxx_alignof_expr (tree e)
     {
       pedwarn ("ISO C++ forbids applying %<__alignof%> to an expression of "
 	       "function type");
-      t = size_one_node;
+      if (TREE_CODE (e) == FUNCTION_DECL)
+	t = size_int (DECL_ALIGN_UNIT (e));
+      else
+	t = size_one_node;
     }
   else if (type_unknown_p (e))
     {
@@ -3104,7 +3107,7 @@ build_binary_op (enum tree_code code, tree orig_op0, tree orig_op1,
   if ((invalid_op_diag
        = targetm.invalid_binary_op (code, type0, type1)))
     {
-      error (invalid_op_diag);
+      error (invalid_op_diag, "");
       return error_mark_node;
     }
 
@@ -3473,7 +3476,7 @@ build_binary_op (enum tree_code code, tree orig_op0, tree orig_op1,
 	      || !same_scalar_type_ignoring_signedness (TREE_TYPE (type0),
 							TREE_TYPE (type1)))
 	    {
-	      binary_op_error (code);
+	      binary_op_error (code, type0, type1);
 	      return error_mark_node;
 	    }
 	  arithmetic_types_p = 1;
@@ -4031,7 +4034,7 @@ build_unary_op (enum tree_code code, tree xarg, int noconvert)
 				    : code),
 				   TREE_TYPE (xarg))))
     {
-      error (invalid_op_diag);
+      error (invalid_op_diag, "");
       return error_mark_node;
     }
 
@@ -6226,7 +6229,7 @@ convert_for_assignment (tree type, tree rhs,
   coder = TREE_CODE (rhstype);
 
   if (TREE_CODE (type) == VECTOR_TYPE && coder == VECTOR_TYPE
-      && vector_types_convertible_p (type, rhstype))
+      && vector_types_convertible_p (type, rhstype, true))
     return convert (type, rhs);
 
   if (rhs == error_mark_node || rhstype == error_mark_node)
@@ -6796,7 +6799,7 @@ ptr_reasonably_similar (tree to, tree from)
 	continue;
 
       if (TREE_CODE (to) == VECTOR_TYPE
-	  && vector_types_convertible_p (to, from))
+	  && vector_types_convertible_p (to, from, false))
 	return 1;
 
       if (TREE_CODE (to) == INTEGER_TYPE

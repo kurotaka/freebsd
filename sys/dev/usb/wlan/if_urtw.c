@@ -477,6 +477,7 @@ static struct urtw_pair urtw_ratetable[] = {
 	{ 96, 10 }, { 108, 11 }
 };
 
+#if 0
 static const uint8_t urtw_8187b_reg_table[][3] = {
 	{ 0xf0, 0x32, 0 }, { 0xf1, 0x32, 0 }, { 0xf2, 0x00, 0 },
 	{ 0xf3, 0x00, 0 }, { 0xf4, 0x32, 0 }, { 0xf5, 0x43, 0 },
@@ -510,6 +511,7 @@ static const uint8_t urtw_8187b_reg_table[][3] = {
 	{ 0x4c, 0x00, 2 }, { 0x9f, 0x00, 3 }, { 0x8c, 0x01, 0 },
 	{ 0x8d, 0x10, 0 }, { 0x8e, 0x08, 0 }, { 0x8f, 0x00, 0 }
 };
+#endif
 
 static usb_callback_t urtw_bulk_rx_callback;
 static usb_callback_t urtw_bulk_tx_callback;
@@ -4177,6 +4179,7 @@ urtw_bulk_tx_status_callback(struct usb_xfer *xfer, usb_error_t error)
 	case USB_ST_SETUP:
 setup:
 		memcpy(dma_buf, &sc->sc_txstatus, sizeof(uint64_t));
+		usbd_xfer_set_frame_len(xfer, 0, sizeof(uint64_t));
 		usbd_transfer_submit(xfer);
 		break;
 	default:

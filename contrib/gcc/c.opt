@@ -284,6 +284,12 @@ Wmissing-prototypes
 C ObjC Var(warn_missing_prototypes)
 Warn about global functions without prototypes
 
+; APPLE LOCAL begin -Wmost
+Wmost
+C ObjC C++ ObjC++ 
+Like -Wall but without -Wparentheses
+; APPLE LOCAL end -Wmost
+
 Wmultichar
 C ObjC C++ ObjC++
 Warn about use of multi-character character constants
@@ -291,6 +297,12 @@ Warn about use of multi-character character constants
 Wnested-externs
 C ObjC Var(warn_nested_externs)
 Warn about \"extern\" declarations not at file scope
+
+; APPLE LOCAL begin -Wnewline-eof
+Wnewline-eof
+C ObjC C++ ObjC++
+Warn about files missing a newline at the end of the file
+; APPLE LOCAL end -Wnewline-eof
 
 Wnon-template-friend
 C++ ObjC++ Var(warn_nontemplate_friend) Init(1)
@@ -584,6 +596,10 @@ Inject friend functions into enclosing namespace
 flabels-ok
 C++ ObjC++
 
+flax-vector-conversions
+C ObjC C++ ObjC++
+Allow implicit conversions between vectors with differing numbers of subparts and/or differing element types.
+
 fms-extensions
 C ObjC C++ ObjC++
 Don't warn about uses of Microsoft extensions
@@ -736,6 +752,10 @@ Use __cxa_get_exception_ptr in exception handling
 fvisibility-inlines-hidden
 C++ ObjC++
 Marks all inlined methods as having hidden visibility
+
+fvisibility-ms-compat
+C++ ObjC++ Var(flag_visibility_ms_compat)
+Changes visibility to match Microsoft Visual Studio by default
 
 fvtable-gc
 C++ ObjC++

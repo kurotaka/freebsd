@@ -16,6 +16,7 @@
 #            (by default, the directory above this one) 
 #  PORTSDIR: location of ports tree to distribute (default: /usr/ports)
 #  DOCDIR:   location of doc tree (default: /usr/doc)
+#  NOPKG:    if set, do not distribute third-party packages
 #  NOPORTS:  if set, do not distribute ports tree
 #  NOSRC:    if set, do not distribute source tree
 #  NODOC:    if set, do not generate release documentation
@@ -103,6 +104,8 @@ base.txz:
 # Set up mergemaster root database
 	sh ${.CURDIR}/scripts/mm-mtree.sh -m ${WORLDDIR} -F \
 	    "TARGET_ARCH=${TARGET_ARCH} TARGET=${TARGET}" -D "${.OBJDIR}/${DISTDIR}/base"
+	etcupdate extract -B -M "TARGET_ARCH=${TARGET_ARCH} TARGET=${TARGET}" \
+	    -d "${.OBJDIR}/${DISTDIR}/base/var/db/etcupdate"
 # Package all components
 	cd ${WORLDDIR} && ${IMAKE} packageworld DISTDIR=${.OBJDIR}/${DISTDIR}
 	mv ${DISTDIR}/*.txz .
@@ -116,13 +119,13 @@ src.txz:
 	mkdir -p ${DISTDIR}/usr
 	ln -fs ${WORLDDIR} ${DISTDIR}/usr/src
 	cd ${DISTDIR} && tar cLvJf ${.OBJDIR}/src.txz --exclude .svn --exclude .zfs \
-	    --exclude CVS --exclude @ --exclude usr/src/release/dist usr/src
+	    --exclude .git --exclude @ --exclude usr/src/release/dist usr/src
 
 ports.txz:
 	mkdir -p ${DISTDIR}/usr
 	ln -fs ${PORTSDIR} ${DISTDIR}/usr/ports
 	cd ${DISTDIR} && tar cLvJf ${.OBJDIR}/ports.txz \
-	    --exclude CVS --exclude .svn \
+	    --exclude .git --exclude .svn \
 	    --exclude usr/ports/distfiles --exclude usr/ports/packages \
 	    --exclude 'usr/ports/INDEX*' --exclude work usr/ports
 
@@ -141,7 +144,7 @@ system: packagesystem
 	mkdir -p release
 	cd ${WORLDDIR} && ${IMAKE} installkernel installworld distribution \
 		DESTDIR=${.OBJDIR}/release WITHOUT_RESCUE=1 WITHOUT_KERNEL_SYMBOLS=1 \
-		WITHOUT_PROFILE=1
+		WITHOUT_PROFILE=1 WITHOUT_SENDMAIL=1 WITHOUT_ATF=1 WITHOUT_LIB32=1
 # Copy distfiles
 	mkdir -p release/usr/freebsd-dist
 	cp *.txz MANIFEST release/usr/freebsd-dist
@@ -230,10 +233,14 @@ packagesystem: base.txz kernel.txz ${EXTRA_PACKAGES}
 	touch ${.TARGET}
 
 pkg-stage:
-.if(exists(${.CURDIR}/${TARGET}/pkg-stage.conf))
-	sh ${.CURDIR}/scripts/pkg-stage.sh ${.CURDIR}/${TARGET}/pkg-stage.conf \
-		${REVISION}
+.if !defined(NOPKG)
+	env REPOS_DIR=${.CURDIR}/pkg_repos/ \
+		sh ${.CURDIR}/scripts/pkg-stage.sh
+	mkdir -p ${.OBJDIR}/dvd/packages/repos/
+	cp ${.CURDIR}/scripts/FreeBSD_install_cdrom.conf \
+		${.OBJDIR}/dvd/packages/repos/
 .endif
+	touch ${.TARGET}
 
 cdrom: disc1.iso bootonly.iso
 dvdrom: dvd1.iso

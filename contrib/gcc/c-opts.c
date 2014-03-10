@@ -385,12 +385,17 @@ c_common_handle_option (size_t scode, const char *arg, int value)
       break;
 
     case OPT_Wall:
+      /* APPLE LOCAL -Wmost */
+    case OPT_Wmost:
       set_Wunused (value);
       set_Wformat (value);
       set_Wimplicit (value);
       warn_char_subscripts = value;
       warn_missing_braces = value;
-      warn_parentheses = value;
+      /* APPLE LOCAL begin -Wmost --dpatel */
+      if (code != OPT_Wmost) 
+	warn_parentheses = value;
+      /* APPLE LOCAL end -Wmost --dpatel */
       warn_return_type = value;
       warn_sequence_point = value;	/* Was C only.  */
       if (c_dialect_cxx ())
@@ -486,6 +491,12 @@ c_common_handle_option (size_t scode, const char *arg, int value)
     case OPT_Wmultichar:
       cpp_opts->warn_multichar = value;
       break;
+
+      /* APPLE LOCAL begin -Wnewline-eof */
+    case OPT_Wnewline_eof:
+      cpp_opts->warn_newline_at_eof = value;
+      break;
+      /* APPLE LOCAL end -Wnewline-eof */
 
     case OPT_Wnormalized_:
       if (!value || (arg && strcasecmp (arg, "none") == 0))
@@ -708,6 +719,10 @@ c_common_handle_option (size_t scode, const char *arg, int value)
 
     case OPT_fimplicit_templates:
       flag_implicit_templates = value;
+      break;
+
+    case OPT_flax_vector_conversions:
+      flag_lax_vector_conversions = value;
       break;
 
     case OPT_fms_extensions:

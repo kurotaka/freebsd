@@ -216,16 +216,16 @@ proc_addr2sym(struct proc_handle *p, uintptr_t addr, char *name,
 
 	if ((map = proc_addr2map(p, addr)) == NULL)
 		return (-1);
-	if (!map->pr_mapname || (fd = open(map->pr_mapname, O_RDONLY, 0)) < 0) {
-		warn("ERROR: open %s failed", map->pr_mapname);
+	if ((fd = open(map->pr_mapname, O_RDONLY, 0)) < 0) {
+		DPRINTF("ERROR: open %s failed", map->pr_mapname);
 		goto err0;
 	}
 	if ((e = elf_begin(fd, ELF_C_READ, NULL)) == NULL) {
-		warn("ERROR: elf_begin() failed");
+		DPRINTFX("ERROR: elf_begin() failed: %s", elf_errmsg(-1));
 		goto err1;
 	}
 	if (gelf_getehdr(e, &ehdr) == NULL) {
-		warn("ERROR: gelf_getehdr() failed");
+		DPRINTFX("ERROR: gelf_getehdr() failed: %s", elf_errmsg(-1));
 		goto err2;
 	}
 	/*
@@ -253,8 +253,8 @@ proc_addr2sym(struct proc_handle *p, uintptr_t addr, char *name,
 	 * Then look up the string name in STRTAB (.dynstr)
 	 */
 	if ((data = elf_getdata(dynsymscn, NULL)) == NULL) {
-		DPRINTF("ERROR: elf_getdata() failed");
-		goto err2;
+		DPRINTFX("ERROR: elf_getdata() failed: %s", elf_errmsg(-1));
+		goto symtab;
 	}
 	i = 0;
 	while (gelf_getsym(data, i++, &sym) != NULL) {
@@ -262,8 +262,11 @@ proc_addr2sym(struct proc_handle *p, uintptr_t addr, char *name,
 		 * Calculate the address mapped to the virtual memory
 		 * by rtld.
 		 */
-		rsym = map->pr_vaddr + sym.st_value;
-		if (addr >= rsym && addr <= (rsym + sym.st_size)) {
+		if (ehdr.e_type != ET_EXEC)
+			rsym = map->pr_vaddr + sym.st_value;
+		else
+			rsym = sym.st_value;
+		if (addr >= rsym && addr < rsym + sym.st_size) {
 			s = elf_strptr(e, dynsymstridx, sym.st_name);
 			if (s) {
 				strlcpy(name, s, namesz);
@@ -279,14 +282,13 @@ proc_addr2sym(struct proc_handle *p, uintptr_t addr, char *name,
 			}
 		}
 	}
+symtab:
 	/*
 	 * Iterate over the Symbols Table to find the symbol.
 	 * Then look up the string name in STRTAB (.dynstr)
 	 */
-	if (symtabscn == NULL)
-		goto err2;
 	if ((data = elf_getdata(symtabscn, NULL)) == NULL) {
-		DPRINTF("ERROR: elf_getdata() failed");
+		DPRINTFX("ERROR: elf_getdata() failed: %s", elf_errmsg(-1));
 		goto err2;
 	}
 	i = 0;
@@ -299,7 +301,7 @@ proc_addr2sym(struct proc_handle *p, uintptr_t addr, char *name,
 			rsym = map->pr_vaddr + sym.st_value;
 		else
 			rsym = sym.st_value;
-		if (addr >= rsym && addr <= (rsym + sym.st_size)) {
+		if (addr >= rsym && addr < rsym + sym.st_size) {
 			s = elf_strptr(e, symtabstridx, sym.st_name);
 			if (s) {
 				strlcpy(name, s, namesz);
@@ -391,7 +393,7 @@ proc_name2sym(struct proc_handle *p, const char *object, const char *symbol,
 	unsigned long symtabstridx = 0, dynsymstridx = 0;
 
 	if ((map = proc_name2map(p, object)) == NULL) {
-		DPRINTF("ERROR: couldn't find object %s", object);
+		DPRINTFX("ERROR: couldn't find object %s", object);
 		goto err0;
 	}
 	if ((fd = open(map->pr_mapname, O_RDONLY, 0)) < 0) {
@@ -399,11 +401,11 @@ proc_name2sym(struct proc_handle *p, const char *object, const char *symbol,
 		goto err0;
 	}
 	if ((e = elf_begin(fd, ELF_C_READ, NULL)) == NULL) {
-		warn("ERROR: elf_begin() failed");
+		DPRINTFX("ERROR: elf_begin() failed: %s", elf_errmsg(-1));
 		goto err1;
 	}
 	if (gelf_getehdr(e, &ehdr) == NULL) {
-		warn("ERROR: gelf_getehdr() failed");
+		DPRINTFX("ERROR: gelf_getehdr() failed: %s", elf_errmsg(-1));
 		goto err2;
 	}
 	/*
@@ -430,40 +432,38 @@ proc_name2sym(struct proc_handle *p, const char *object, const char *symbol,
 	 * Iterate over the Dynamic Symbols table to find the symbol.
 	 * Then look up the string name in STRTAB (.dynstr)
 	 */
-	if ((data = elf_getdata(dynsymscn, NULL)) == NULL) {
-		DPRINTF("ERROR: elf_getdata() failed");
-		goto err2;
-	}
-	i = 0;
-	while (gelf_getsym(data, i++, &sym) != NULL) {
-		s = elf_strptr(e, dynsymstridx, sym.st_name);
-		if (s && strcmp(s, symbol) == 0) {
-			memcpy(symcopy, &sym, sizeof(sym));
-			symcopy->st_value = map->pr_vaddr + sym.st_value;
-			error = 0;
-			goto out;
+	if ((data = elf_getdata(dynsymscn, NULL))) {
+		i = 0;
+		while (gelf_getsym(data, i++, &sym) != NULL) {
+			s = elf_strptr(e, dynsymstridx, sym.st_name);
+			if (s && strcmp(s, symbol) == 0) {
+				memcpy(symcopy, &sym, sizeof(sym));
+				if (ehdr.e_type != ET_EXEC)
+					symcopy->st_value += map->pr_vaddr;
+				error = 0;
+				goto out;
+			}
 		}
 	}
 	/*
 	 * Iterate over the Symbols Table to find the symbol.
 	 * Then look up the string name in STRTAB (.dynstr)
 	 */
-	if (symtabscn == NULL)
-		goto err2;
-	if ((data = elf_getdata(symtabscn, NULL)) == NULL) {
-		DPRINTF("ERROR: elf_getdata() failed");
-		goto err2;
-	}
-	i = 0;
-	while (gelf_getsym(data, i++, &sym) != NULL) {
-		s = elf_strptr(e, symtabstridx, sym.st_name);
-		if (s && strcmp(s, symbol) == 0) {
-			memcpy(symcopy, &sym, sizeof(sym));
-			error = 0;
-			goto out;
+	if ((data = elf_getdata(symtabscn, NULL))) {
+		i = 0;
+		while (gelf_getsym(data, i++, &sym) != NULL) {
+			s = elf_strptr(e, symtabstridx, sym.st_name);
+			if (s && strcmp(s, symbol) == 0) {
+				memcpy(symcopy, &sym, sizeof(sym));
+				if (ehdr.e_type != ET_EXEC)
+					symcopy->st_value += map->pr_vaddr;
+				error = 0;
+				goto out;
+			}
 		}
 	}
 out:
+	DPRINTFX("found addr 0x%lx for %s", symcopy->st_value, symbol);
 err2:
 	elf_end(e);
 err1:
@@ -484,6 +484,7 @@ proc_iter_symbyaddr(struct proc_handle *p, const char *object, int which,
 	prmap_t *map;
 	Elf_Scn *scn, *foundscn = NULL;
 	Elf_Data *data;
+	GElf_Ehdr ehdr;
 	GElf_Shdr shdr;
 	GElf_Sym sym;
 	unsigned long stridx = -1;
@@ -493,12 +494,16 @@ proc_iter_symbyaddr(struct proc_handle *p, const char *object, int which,
 	if ((map = proc_name2map(p, object)) == NULL)
 		return (-1);
 	if ((fd = open(map->pr_mapname, O_RDONLY)) < 0) {
-		warn("ERROR: open %s failed", map->pr_mapname);
+		DPRINTF("ERROR: open %s failed", map->pr_mapname);
 		goto err0;
 	}
 	if ((e = elf_begin(fd, ELF_C_READ, NULL)) == NULL) {
-		warn("ERROR: elf_begin() failed");
+		DPRINTFX("ERROR: elf_begin() failed: %s", elf_errmsg(-1));
 		goto err1;
+	}
+	if (gelf_getehdr(e, &ehdr) == NULL) {
+		DPRINTFX("ERROR: gelf_getehdr() failed: %s", elf_errmsg(-1));
+		goto err2;
 	}
 	/*
 	 * Find the section we are looking for.
@@ -520,7 +525,7 @@ proc_iter_symbyaddr(struct proc_handle *p, const char *object, int which,
 		return (-1);
 	stridx = shdr.sh_link;
 	if ((data = elf_getdata(foundscn, NULL)) == NULL) {
-		DPRINTF("ERROR: elf_getdata() failed");
+		DPRINTFX("ERROR: elf_getdata() failed: %s", elf_errmsg(-1));
 		goto err2;
 	}
 	i = 0;
@@ -550,7 +555,8 @@ proc_iter_symbyaddr(struct proc_handle *p, const char *object, int which,
 		    (mask & TYPE_FILE) == 0)
 			continue;
 		s = elf_strptr(e, stridx, sym.st_name);
-		sym.st_value += map->pr_vaddr;
+		if (ehdr.e_type != ET_EXEC)
+			sym.st_value += map->pr_vaddr;
 		(*func)(cd, &sym, s);
 	}
 	error = 0;

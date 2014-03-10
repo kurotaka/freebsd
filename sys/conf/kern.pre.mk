@@ -4,10 +4,11 @@
 # of the definitions that need to be before %BEFORE_DEPEND.
 
 .include <bsd.own.mk>
-.include <bsd.compiler.mk>
+.sinclude <bsd.compiler.mk>
 
 # backwards compat option for older systems.
 MACHINE_CPUARCH?=${MACHINE_ARCH:C/mipse[lb]/mips/:C/armeb/arm/:C/powerpc64/powerpc/}
+COMPILER_TYPE?="gcc"
 
 # Can be overridden by makeoptions or /etc/make.conf
 KERNEL_KO?=	kernel
@@ -105,6 +106,8 @@ ASM_CFLAGS= -x assembler-with-cpp -DLOCORE ${CFLAGS}
 
 .if ${COMPILER_TYPE} == "clang"
 CLANG_NO_IAS= -no-integrated-as
+.else
+GCC_MS_EXTENSIONS= -fms-extensions
 .endif
 
 .if defined(PROFLEVEL) && ${PROFLEVEL} >= 1
@@ -156,7 +159,7 @@ NORMAL_LINT=	${LINT} ${LINTFLAGS} ${CFLAGS:M-[DIU]*} ${.IMPSRC}
 # Infiniband C flags.  Correct include paths and omit errors that linux
 # does not honor.
 OFEDINCLUDES=	-I$S/ofed/include/
-OFEDNOERR=	-Wno-cast-qual -Wno-pointer-arith -fms-extensions
+OFEDNOERR=	-Wno-cast-qual -Wno-pointer-arith ${GCC_MS_EXTENSIONS}
 OFEDCFLAGS=	${CFLAGS:N-I*} ${OFEDINCLUDES} ${CFLAGS:M-I*} ${OFEDNOERR}
 OFED_C_NOIMP=	${CC} -c -o ${.TARGET} ${OFEDCFLAGS} ${WERROR} ${PROF}
 OFED_C=		${OFED_C_NOIMP} ${.IMPSRC}

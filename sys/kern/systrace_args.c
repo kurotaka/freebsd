@@ -209,8 +209,8 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		uarg[1] = (intptr_t) p->buf; /* caddr_t */
 		uarg[2] = p->len; /* size_t */
 		iarg[3] = p->flags; /* int */
-		uarg[4] = (intptr_t) p->from; /* struct sockaddr *__restrict */
-		uarg[5] = (intptr_t) p->fromlenaddr; /* __socklen_t *__restrict */
+		uarg[4] = (intptr_t) p->from; /* struct sockaddr * */
+		uarg[5] = (intptr_t) p->fromlenaddr; /* __socklen_t * */
 		*n_args = 6;
 		break;
 	}
@@ -218,8 +218,8 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 30: {
 		struct accept_args *p = params;
 		iarg[0] = p->s; /* int */
-		uarg[1] = (intptr_t) p->name; /* struct sockaddr *__restrict */
-		uarg[2] = (intptr_t) p->anamelen; /* __socklen_t *__restrict */
+		uarg[1] = (intptr_t) p->name; /* struct sockaddr * */
+		uarg[2] = (intptr_t) p->anamelen; /* __socklen_t * */
 		*n_args = 3;
 		break;
 	}
@@ -227,8 +227,8 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 31: {
 		struct getpeername_args *p = params;
 		iarg[0] = p->fdes; /* int */
-		uarg[1] = (intptr_t) p->asa; /* struct sockaddr *__restrict */
-		uarg[2] = (intptr_t) p->alen; /* __socklen_t *__restrict */
+		uarg[1] = (intptr_t) p->asa; /* struct sockaddr * */
+		uarg[2] = (intptr_t) p->alen; /* __socklen_t * */
 		*n_args = 3;
 		break;
 	}
@@ -236,8 +236,8 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 32: {
 		struct getsockname_args *p = params;
 		iarg[0] = p->fdes; /* int */
-		uarg[1] = (intptr_t) p->asa; /* struct sockaddr *__restrict */
-		uarg[2] = (intptr_t) p->alen; /* __socklen_t *__restrict */
+		uarg[1] = (intptr_t) p->asa; /* struct sockaddr * */
+		uarg[2] = (intptr_t) p->alen; /* __socklen_t * */
 		*n_args = 3;
 		break;
 	}
@@ -3265,6 +3265,16 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		*n_args = 6;
 		break;
 	}
+	/* procctl */
+	case 544: {
+		struct procctl_args *p = params;
+		iarg[0] = p->idtype; /* idtype_t */
+		iarg[1] = p->id; /* id_t */
+		iarg[2] = p->com; /* int */
+		uarg[3] = (intptr_t) p->data; /* void * */
+		*n_args = 4;
+		break;
+	}
 	default:
 		*n_args = 0;
 		break;
@@ -3584,10 +3594,10 @@ systrace_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 4:
-			p = "struct sockaddr *__restrict";
+			p = "struct sockaddr *";
 			break;
 		case 5:
-			p = "__socklen_t *__restrict";
+			p = "__socklen_t *";
 			break;
 		default:
 			break;
@@ -3600,10 +3610,10 @@ systrace_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "struct sockaddr *__restrict";
+			p = "struct sockaddr *";
 			break;
 		case 2:
-			p = "__socklen_t *__restrict";
+			p = "__socklen_t *";
 			break;
 		default:
 			break;
@@ -3616,10 +3626,10 @@ systrace_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "struct sockaddr *__restrict";
+			p = "struct sockaddr *";
 			break;
 		case 2:
-			p = "__socklen_t *__restrict";
+			p = "__socklen_t *";
 			break;
 		default:
 			break;
@@ -3632,10 +3642,10 @@ systrace_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "struct sockaddr *__restrict";
+			p = "struct sockaddr *";
 			break;
 		case 2:
-			p = "__socklen_t *__restrict";
+			p = "__socklen_t *";
 			break;
 		default:
 			break;
@@ -8689,6 +8699,25 @@ systrace_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			break;
 		case 5:
 			p = "siginfo_t *";
+			break;
+		default:
+			break;
+		};
+		break;
+	/* procctl */
+	case 544:
+		switch(ndx) {
+		case 0:
+			p = "idtype_t";
+			break;
+		case 1:
+			p = "id_t";
+			break;
+		case 2:
+			p = "int";
+			break;
+		case 3:
+			p = "void *";
 			break;
 		default:
 			break;

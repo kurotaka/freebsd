@@ -2822,6 +2822,8 @@ OLD_FILES+=usr/include/c++/v1/cwctype
 OLD_FILES+=usr/include/c++/v1/cxxabi.h
 OLD_FILES+=usr/include/c++/v1/deque
 OLD_FILES+=usr/include/c++/v1/exception
+OLD_FILES+=usr/include/c++/v1/experimental/dynarray
+OLD_FILES+=usr/include/c++/v1/experimental/optional
 OLD_FILES+=usr/include/c++/v1/ext/__hash
 OLD_FILES+=usr/include/c++/v1/ext/hash_map
 OLD_FILES+=usr/include/c++/v1/ext/hash_set
@@ -2872,6 +2874,7 @@ OLD_FILES+=usr/include/c++/v1/unwind.h
 OLD_FILES+=usr/include/c++/v1/utility
 OLD_FILES+=usr/include/c++/v1/valarray
 OLD_FILES+=usr/include/c++/v1/vector
+OLD_DIRS+=usr/include/c++/v1/experimental
 OLD_DIRS+=usr/include/c++/v1/ext
 OLD_DIRS+=usr/include/c++/v1
 .endif
@@ -3123,6 +3126,21 @@ OLD_FILES+=usr/share/man/man8/ntptime.8.gz
 #.if ${MK_OPENSSL} == no
 # to be filled in
 #.endif
+
+.if ${MK_SYSINSTALL} == no
+OLD_FILES+=usr/sbin/sysinstall
+OLD_FILES+=usr/share/man/man8/sysinstall.8.gz
+OLD_FILES+=usr/lib/libftpio.a
+OLD_FILES+=usr/lib/libftpio.so
+OLD_LIBS+=usr/lib/libftpio.so.8
+OLD_FILES+=usr/lib/libftpio_p.a
+OLD_FILES+=usr/lib32/libftpio.a
+OLD_FILES+=usr/lib32/libftpio.so
+OLD_LIBS+=usr/lib32/libftpio.so.8
+OLD_FILES+=usr/lib32/libftpio_p.a
+OLD_FILES+=usr/include/ftpio.h
+OLD_FILES+=usr/share/man/man3/ftpio.3.gz
+.endif
 
 .if ${MK_PC_SYSINSTALL} == no
 # backend-partmanager

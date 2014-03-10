@@ -91,8 +91,8 @@ __FBSDID("$FreeBSD$");
 MALLOC_DEFINE(M_FADVISE, "fadvise", "posix_fadvise(2) information");
 
 SDT_PROVIDER_DEFINE(vfs);
-SDT_PROBE_DEFINE2(vfs, , stat, mode, mode, "char *", "int");
-SDT_PROBE_DEFINE2(vfs, , stat, reg, reg, "char *", "int");
+SDT_PROBE_DEFINE2(vfs, , stat, mode, "char *", "int");
+SDT_PROBE_DEFINE2(vfs, , stat, reg, "char *", "int");
 
 static int chroot_refuse_vdir_fds(struct filedesc *fdp);
 static int getutimes(const struct timeval *, enum uio_seg, struct timespec *);
@@ -4880,7 +4880,9 @@ int
 sys_posix_fallocate(struct thread *td, struct posix_fallocate_args *uap)
 {
 
-	return (kern_posix_fallocate(td, uap->fd, uap->offset, uap->len));
+	td->td_retval[0] = kern_posix_fallocate(td, uap->fd, uap->offset,
+	    uap->len);
+	return (0);
 }
 
 /*
@@ -5018,6 +5020,7 @@ int
 sys_posix_fadvise(struct thread *td, struct posix_fadvise_args *uap)
 {
 
-	return (kern_posix_fadvise(td, uap->fd, uap->offset, uap->len,
-	    uap->advice));
+	td->td_retval[0] = kern_posix_fadvise(td, uap->fd, uap->offset,
+	    uap->len, uap->advice);
+	return (0);
 }

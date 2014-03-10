@@ -7,20 +7,22 @@
 CHROOTDIR="/scratch"
 
 ## Set the svn host.
-SVNROOT="svn://svn.FreeBSD.org"
+SVNROOT="svn://svn.FreeBSD.org/"
 
 ## Set the src/, ports/, and doc/ branches or tags.
-SRCBRANCH="base/stable/9"
-DOCBRANCH="doc/head"
-PORTBRANCH="ports/head"
+SRCBRANCH="base/stable/9@rHEAD"
+DOCBRANCH="doc/head@rHEAD"
+PORTBRANCH="ports/head@rHEAD"
 
 ## Run svn co --force for src checkout.
 #SRC_FORCE_CHECKOUT=yes
 
-## Set the src/, ports/, and doc/ revisions.
-SRCREVISION="-rHEAD"
-DOCREVISION="-rHEAD"
-PORTREVISION="-rHEAD"
+## Sample configuration for using git instead of svn.
+#VCSCMD="/usr/local/bin/git clone --branch master"
+#SVNROOT=""
+#SRCBRANCH="https://github.com/freebsd/freebsd"
+#DOCBRANCH="https://github.com/freebsd/freebsd-doc"
+#PORTBRANCH="https://github.com/freebsd/freebsd-ports"
 
 ## Set to override the default target architecture.
 #TARGET="amd64"
@@ -38,7 +40,7 @@ PORTREVISION="-rHEAD"
 
 ## Set to use world- and kernel-specific make(1) flags.
 #WORLD_FLAGS="-j $(sysctl -n hw.ncpu)"
-#KERNEL_FLAGS="-j $(expr $(sysctl -n hw.ncpu) / 2)"
+#KERNEL_FLAGS="-j $(( $(( $(sysctl -n hw.ncpu) + 1 )) / 2 ))"
 
 ## Set miscellaneous 'make release' settings.
 #NODOC=

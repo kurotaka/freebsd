@@ -254,6 +254,10 @@ int flag_short_double;
 
 int flag_short_wchar;
 
+/* Nonzero means allow implicit conversions between vectors with
+   differing numbers of subparts and/or differing element types.  */
+int flag_lax_vector_conversions;
+
 /* Nonzero means allow Microsoft extensions without warnings or errors.  */
 int flag_ms_extensions;
 
@@ -537,6 +541,9 @@ static tree handle_pure_attribute (tree *, tree, tree, int, bool *);
 static tree handle_novops_attribute (tree *, tree, tree, int, bool *);
 static tree handle_deprecated_attribute (tree *, tree, tree, int,
 					 bool *);
+/* APPLE LOCAL begin "unavailable" attribute (Radar 2809697) --ilr */
+static tree handle_unavailable_attribute (tree *, tree, tree, int,  bool *);
+/* APPLE LOCAL end "unavailable" attribute --ilr */
 static tree handle_vector_size_attribute (tree *, tree, tree, int,
 					  bool *);
 static tree handle_nonnull_attribute (tree *, tree, tree, int, bool *);
@@ -622,6 +629,10 @@ const struct attribute_spec c_common_attribute_table[] =
 			      handle_novops_attribute },
   { "deprecated",             0, 0, false, false, false,
 			      handle_deprecated_attribute },
+  /* APPLE LOCAL begin "unavailable" attribute (Radar 2809697) --ilr */
+  { "unavailable",            0, 0, false, false, false,
+			      handle_unavailable_attribute },
+  /* APPLE LOCAL end "unavailable" attribute --ilr */
   { "vector_size",	      1, 1, false, true, false,
 			      handle_vector_size_attribute },
   { "visibility",	      1, 1, false, false, false,
@@ -916,39 +927,45 @@ constant_expression_warning (tree value)
     pedwarn ("overflow in constant expression");
 }
 
-/* Print a warning if an expression had overflow in folding.
+/* Print a warning if an expression had overflow in folding and its
+   operands hadn't.
+
    Invoke this function on every expression that
    (1) appears in the source code, and
-   (2) might be a constant expression that overflowed, and
+   (2) is a constant expression that overflowed, and
    (3) is not already checked by convert_and_check;
-   however, do not invoke this function on operands of explicit casts.  */
+   however, do not invoke this function on operands of explicit casts
+   or when the expression is the result of an operator and any operand
+   already overflowed.  */
 
 void
 overflow_warning (tree value)
 {
-  if ((TREE_CODE (value) == INTEGER_CST
-       || (TREE_CODE (value) == COMPLEX_CST
-	   && TREE_CODE (TREE_REALPART (value)) == INTEGER_CST))
-      && TREE_OVERFLOW (value))
+  if (skip_evaluation) return;
+
+  switch (TREE_CODE (value))
     {
-      TREE_OVERFLOW (value) = 0;
-      if (skip_evaluation == 0)
-	warning (OPT_Woverflow, "integer overflow in expression");
-    }
-  else if ((TREE_CODE (value) == REAL_CST
-	    || (TREE_CODE (value) == COMPLEX_CST
-		&& TREE_CODE (TREE_REALPART (value)) == REAL_CST))
-	   && TREE_OVERFLOW (value))
-    {
-      TREE_OVERFLOW (value) = 0;
-      if (skip_evaluation == 0)
-	warning (OPT_Woverflow, "floating point overflow in expression");
-    }
-  else if (TREE_CODE (value) == VECTOR_CST && TREE_OVERFLOW (value))
-    {
-      TREE_OVERFLOW (value) = 0;
-      if (skip_evaluation == 0)
-	warning (OPT_Woverflow, "vector overflow in expression");
+    case INTEGER_CST:
+      warning (OPT_Woverflow, "integer overflow in expression");
+      break;
+      
+    case REAL_CST:
+      warning (OPT_Woverflow, "floating point overflow in expression");
+      break;
+      
+    case VECTOR_CST:
+      warning (OPT_Woverflow, "vector overflow in expression");
+      break;
+      
+    case COMPLEX_CST:
+      if (TREE_CODE (TREE_REALPART (value)) == INTEGER_CST)
+	warning (OPT_Woverflow, "complex integer overflow in expression");
+      else if (TREE_CODE (TREE_REALPART (value)) == REAL_CST)
+	warning (OPT_Woverflow, "complex floating point overflow in expression");
+      break;
+
+    default:
+      break;
     }
 }
 
@@ -1089,18 +1106,45 @@ constant_fits_type_p (tree c, tree type)
   return !TREE_OVERFLOW (c);
 }
 
-/* Nonzero if vector types T1 and T2 can be converted to each other
-   without an explicit cast.  */
-int
-vector_types_convertible_p (tree t1, tree t2)
+
+/* True if vector types T1 and T2 can be converted to each other
+   without an explicit cast.  If EMIT_LAX_NOTE is true, and T1 and T2
+   can only be converted with -flax-vector-conversions yet that is not
+   in effect, emit a note telling the user about that option if such
+   a note has not previously been emitted.  */
+bool
+vector_types_convertible_p (tree t1, tree t2, bool emit_lax_note)
 {
-  return targetm.vector_opaque_p (t1)
-	 || targetm.vector_opaque_p (t2)
-	 || (tree_int_cst_equal (TYPE_SIZE (t1), TYPE_SIZE (t2))
-	     && (TREE_CODE (TREE_TYPE (t1)) != REAL_TYPE ||
-		 TYPE_PRECISION (t1) == TYPE_PRECISION (t2))
-	     && INTEGRAL_TYPE_P (TREE_TYPE (t1))
-		== INTEGRAL_TYPE_P (TREE_TYPE (t2)));
+  static bool emitted_lax_note = false;
+  bool convertible_lax;
+
+  if ((targetm.vector_opaque_p (t1) || targetm.vector_opaque_p (t2))
+      && tree_int_cst_equal (TYPE_SIZE (t1), TYPE_SIZE (t2)))
+    return true;
+
+  convertible_lax =
+    (tree_int_cst_equal (TYPE_SIZE (t1), TYPE_SIZE (t2))
+     && (TREE_CODE (TREE_TYPE (t1)) != REAL_TYPE ||
+	 TYPE_PRECISION (t1) == TYPE_PRECISION (t2))
+     && (INTEGRAL_TYPE_P (TREE_TYPE (t1))
+	 == INTEGRAL_TYPE_P (TREE_TYPE (t2))));
+
+  if (!convertible_lax || flag_lax_vector_conversions)
+    return convertible_lax;
+
+  if (TYPE_VECTOR_SUBPARTS (t1) == TYPE_VECTOR_SUBPARTS (t2)
+      && comptypes (TREE_TYPE (t1), TREE_TYPE (t2)))
+    return true;
+
+  if (emit_lax_note && !emitted_lax_note)
+    {
+      emitted_lax_note = true;
+      inform ("use -flax-vector-conversions to permit "
+              "conversions between vectors with differing "
+              "element types or numbers of subparts");
+    }
+
+  return false;
 }
 
 /* Convert EXPR to TYPE, warning about conversion problems with constants.
@@ -1982,10 +2026,10 @@ min_precision (tree value, int unsignedp)
 }
 
 /* Print an error message for invalid operands to arith operation
-   CODE.  */
+   CODE with TYPE0 for operand 0, and TYPE1 for operand 1.  */
 
 void
-binary_op_error (enum tree_code code)
+binary_op_error (enum tree_code code, tree type0, tree type1)
 {
   const char *opname;
 
@@ -2036,7 +2080,8 @@ binary_op_error (enum tree_code code)
     default:
       gcc_unreachable ();
     }
-  error ("invalid operands to binary %s", opname);
+  error ("invalid operands to binary %s (have %qT and %qT)", opname,
+	 type0, type1);
 }
 
 /* Subroutine of build_binary_op, used for comparison operations.
@@ -2989,16 +3034,16 @@ c_sizeof_or_alignof_type (tree type, bool is_sizeof, int complain)
 }
 
 /* Implement the __alignof keyword: Return the minimum required
-   alignment of EXPR, measured in bytes.  For VAR_DECL's and
-   FIELD_DECL's return DECL_ALIGN (which can be set from an
-   "aligned" __attribute__ specification).  */
+   alignment of EXPR, measured in bytes.  For VAR_DECLs,
+   FUNCTION_DECLs and FIELD_DECLs return DECL_ALIGN (which can be set
+   from an "aligned" __attribute__ specification).  */
 
 tree
 c_alignof_expr (tree expr)
 {
   tree t;
 
-  if (TREE_CODE (expr) == VAR_DECL)
+  if (VAR_OR_FUNCTION_DECL_P (expr))
     t = size_int (DECL_ALIGN_UNIT (expr));
 
   else if (TREE_CODE (expr) == COMPONENT_REF
@@ -4356,7 +4401,10 @@ handle_unused_attribute (tree *node, tree name, tree ARG_UNUSED (args),
       if (TREE_CODE (decl) == PARM_DECL
 	  || TREE_CODE (decl) == VAR_DECL
 	  || TREE_CODE (decl) == FUNCTION_DECL
-	  || TREE_CODE (decl) == LABEL_DECL
+/* APPLE LOCAL begin for-fsf-4_4 3274130 5295549 */ \
+	  || (TREE_CODE (decl) == LABEL_DECL
+	      && ! DECL_ARTIFICIAL (decl))
+/* APPLE LOCAL end for-fsf-4_4 3274130 5295549 */ \
 	  || TREE_CODE (decl) == TYPE_DECL)
 	TREE_USED (decl) = 1;
       else
@@ -4803,10 +4851,25 @@ handle_aligned_attribute (tree *node, tree ARG_UNUSED (name), tree args,
       TYPE_ALIGN (*type) = (1 << i) * BITS_PER_UNIT;
       TYPE_USER_ALIGN (*type) = 1;
     }
-  else if (TREE_CODE (decl) != VAR_DECL
-	   && TREE_CODE (decl) != FIELD_DECL)
+  else if (! VAR_OR_FUNCTION_DECL_P (decl)
+/* APPLE LOCAL begin for-fsf-4_4 3274130 5295549 */ \
+	   && TREE_CODE (decl) != FIELD_DECL
+	   && TREE_CODE (decl) != LABEL_DECL)
+/* APPLE LOCAL end for-fsf-4_4 3274130 5295549 */ \
     {
       error ("alignment may not be specified for %q+D", decl);
+      *no_add_attrs = true;
+    }
+  else if (TREE_CODE (decl) == FUNCTION_DECL
+	   && DECL_ALIGN (decl) > (1 << i) * BITS_PER_UNIT)
+    {
+      if (DECL_USER_ALIGN (decl))
+	error ("alignment for %q+D was previously specified as %d "
+	       "and may not be decreased", decl,
+	       DECL_ALIGN (decl) / BITS_PER_UNIT);
+      else
+	error ("alignment for %q+D must be at least %d", decl,
+	       DECL_ALIGN (decl) / BITS_PER_UNIT);
       *no_add_attrs = true;
     }
   else
@@ -5294,6 +5357,69 @@ handle_deprecated_attribute (tree *node, tree name,
 
   return NULL_TREE;
 }
+
+/* APPLE LOCAL begin "unavailable" attribute (Radar 2809697) --ilr */
+/* Handle a "unavailable" attribute; arguments as in
+   struct attribute_spec.handler.  */
+
+static tree
+handle_unavailable_attribute (tree *node, tree name,
+			      tree args ATTRIBUTE_UNUSED,
+			      int flags ATTRIBUTE_UNUSED,
+			      bool *no_add_attrs)
+{
+  tree type = NULL_TREE;
+  int warn = 0;
+  const char *what = NULL;
+
+  if (DECL_P (*node))
+    {
+      tree decl = *node;
+      type = TREE_TYPE (decl);
+
+      if (TREE_CODE (decl) == TYPE_DECL
+      	  || TREE_CODE (decl) == PARM_DECL
+	  || TREE_CODE (decl) == VAR_DECL
+	  || TREE_CODE (decl) == FUNCTION_DECL
+	  || TREE_CODE (decl) == FIELD_DECL)
+	  /* Removed radar 3803157 - objc attribute */
+	{
+	  TREE_UNAVAILABLE (decl) = 1;
+	}
+      else
+	warn = 1;
+    }
+  else if (TYPE_P (*node))
+    {
+      if (!(flags & (int) ATTR_FLAG_TYPE_IN_PLACE))
+	*node = build_variant_type_copy (*node);
+      TREE_UNAVAILABLE (*node) = 1;
+      type = *node;
+    }
+  else
+    warn = 1;
+
+  if (warn)
+    {
+      *no_add_attrs = true;
+      if (type && TYPE_NAME (type))
+	{
+	  if (TREE_CODE (TYPE_NAME (type)) == IDENTIFIER_NODE)
+	    what = IDENTIFIER_POINTER (TYPE_NAME (*node));
+	  else if (TREE_CODE (TYPE_NAME (type)) == TYPE_DECL
+		   && DECL_NAME (TYPE_NAME (type)))
+	    what = IDENTIFIER_POINTER (DECL_NAME (TYPE_NAME (type)));
+	}
+      if (what)
+	warning (0, "`%s' attribute ignored for `%s'",
+		 IDENTIFIER_POINTER (name), what);
+      else
+	warning (0, "`%s' attribute ignored", IDENTIFIER_POINTER (name));
+    }
+
+  return NULL_TREE;
+}
+/* APPLE LOCAL end "unavailable" attribute --ilr */
 
 /* Handle a "vector_size" attribute; arguments as in
    struct attribute_spec.handler.  */
@@ -5964,11 +6090,11 @@ c_parse_error (const char *gmsgid, enum cpp_ttype token, tree value)
       message = NULL;
     }
   else
-    error (gmsgid);
+    error (gmsgid, "");
 
   if (message)
     {
-      error (message);
+      error (message, "");
       free (message);
     }
 #undef catenate_messages

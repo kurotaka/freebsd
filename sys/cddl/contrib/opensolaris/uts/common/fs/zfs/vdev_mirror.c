@@ -132,7 +132,7 @@ vdev_mirror_map_alloc(zio_t *zio)
 
 static int
 vdev_mirror_open(vdev_t *vd, uint64_t *asize, uint64_t *max_asize,
-    uint64_t *ashift)
+    uint64_t *logical_ashift, uint64_t *physical_ashift)
 {
 	int numerrors = 0;
 	int lasterror = 0;
@@ -155,7 +155,9 @@ vdev_mirror_open(vdev_t *vd, uint64_t *asize, uint64_t *max_asize,
 
 		*asize = MIN(*asize - 1, cvd->vdev_asize - 1) + 1;
 		*max_asize = MIN(*max_asize - 1, cvd->vdev_max_asize - 1) + 1;
-		*ashift = MAX(*ashift, cvd->vdev_ashift);
+		*logical_ashift = MAX(*logical_ashift, cvd->vdev_ashift);
+		*physical_ashift = MAX(*physical_ashift,
+		    cvd->vdev_physical_ashift);
 	}
 
 	if (numerrors == vd->vdev_children) {
@@ -435,7 +437,7 @@ vdev_mirror_io_done(zio_t *zio)
 			zio_nowait(zio_vdev_child_io(zio, zio->io_bp,
 			    mc->mc_vd, mc->mc_offset,
 			    zio->io_data, zio->io_size,
-			    ZIO_TYPE_WRITE, zio->io_priority,
+			    ZIO_TYPE_WRITE, ZIO_PRIORITY_ASYNC_WRITE,
 			    ZIO_FLAG_IO_REPAIR | (unexpected_errors ?
 			    ZIO_FLAG_SELF_HEAL : 0), NULL, NULL));
 		}
