@@ -42,7 +42,6 @@ struct hpet_softc {
 	struct resource		*mem_res;
 	struct resource		*intr_res;
 	void			*intr_handle;
-	ACPI_HANDLE		handle;
 	uint64_t		freq;
 	uint32_t		caps;
 	struct timecounter	tc;
