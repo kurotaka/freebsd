@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/acpica/acpivar.h>
 #include <dev/hpet/hpetreg.h>
+#include <dev/hpet/hpetvar.h>
 
 #ifdef DEV_APIC
 #include "pcib_if.h"
@@ -63,44 +64,6 @@ static devclass_t hpet_devclass;
 /* ACPI CA debugging */
 #define _COMPONENT	ACPI_TIMER
 ACPI_MODULE_NAME("HPET")
-
-struct hpet_softc {
-	device_t		dev;
-	int			mem_rid;
-	int			intr_rid;
-	int			irq;
-	int			useirq;
-	int			legacy_route;
-	int			per_cpu;
-	uint32_t		allowed_irqs;
-	struct resource		*mem_res;
-	struct resource		*intr_res;
-	void			*intr_handle;
-	ACPI_HANDLE		handle;
-	uint64_t		freq;
-	uint32_t		caps;
-	struct timecounter	tc;
-	struct hpet_timer {
-		struct eventtimer	et;
-		struct hpet_softc	*sc;
-		int			num;
-		int			mode;
-		int			intr_rid;
-		int			irq;
-		int			pcpu_cpu;
-		int			pcpu_misrouted;
-		int			pcpu_master;
-		int			pcpu_slaves[MAXCPU];
-		struct resource		*intr_res;
-		void			*intr_handle;
-		uint32_t		caps;
-		uint32_t		vectors;
-		uint32_t		div;
-		uint32_t		next;
-		char			name[8];
-	} 			t[32];
-	int			num_timers;
-};
 
 static u_int hpet_get_timecount(struct timecounter *tc);
 static void hpet_test(struct hpet_softc *sc);
