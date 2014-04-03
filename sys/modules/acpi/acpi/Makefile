@@ -66,7 +66,7 @@ SRCS+=	acpi_resource.c acpi_timer.c acpi_pci_link.c acpi_thermal.c
 
 # ACPI hardware drivers, mostly used for mobile systems.
 SRCS+=	acpi_acad.c acpi_battery.c acpi_cmbat.c acpi_cpu.c acpi_ec.c
-SRCS+=	acpi_hpet.c acpi_lid.c acpi_perf.c acpi_smbat.c acpi_throttle.c
+SRCS+=	acpi_lid.c acpi_perf.c acpi_smbat.c acpi_throttle.c
 
 # OSD layer
 SRCS+=	OsdDebug.c
