@@ -202,3 +202,5 @@ device		usb		# USB Bus (required)
 #device		firewire	# FireWire bus code
 #device		sbp		# SCSI over FireWire (Requires scbus and da)
 #device		fwe		# Ethernet over FireWire (non-standard!)
+
+device		hpet		# High Precision Event Timer (probed w/o ACPI)
