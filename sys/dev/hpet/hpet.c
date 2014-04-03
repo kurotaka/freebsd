@@ -50,7 +50,7 @@ __FBSDID("$FreeBSD$");
 #include <contrib/dev/acpica/include/accommon.h>
 
 #include <dev/acpica/acpivar.h>
-#include <dev/acpica/acpi_hpet.h>
+#include <dev/hpet/hpetreg.h>
 
 #ifdef DEV_APIC
 #include "pcib_if.h"

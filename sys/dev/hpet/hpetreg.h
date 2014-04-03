@@ -26,8 +26,8 @@
  * $FreeBSD$
  */
 
-#ifndef __ACPI_HPET_H__
-#define	__ACPI_HPET_H__
+#ifndef __HPETREG_H__
+#define	__HPETREG_H__
 
 #define HPET_MEM_WIDTH		0x400	/* Expected memory region size */
 
@@ -64,4 +64,4 @@
 
 #define	HPET_MIN_CYCLES		128	/* Period considered reliable. */
 
-#endif /* !__ACPI_HPET_H__ */
+#endif /* !__HPETREG_H__ */
