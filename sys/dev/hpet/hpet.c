@@ -56,12 +56,6 @@ __FBSDID("$FreeBSD$");
 #include "pcib_if.h"
 #endif
 
-#define HPET_VENDID_AMD		0x4353
-#define HPET_VENDID_AMD2	0x1022
-#define HPET_VENDID_INTEL	0x8086
-#define HPET_VENDID_NVIDIA	0x10de
-#define HPET_VENDID_SW		0x1166
-
 ACPI_SERIAL_DECL(hpet, "ACPI HPET support");
 
 static devclass_t hpet_devclass;

@@ -34,6 +34,11 @@
 /* General registers */
 #define HPET_CAPABILITIES	0x0	/* General capabilities and ID */
 #define	HPET_CAP_VENDOR_ID	0xffff0000
+#define HPET_VENDID_AMD		0x4353
+#define HPET_VENDID_AMD2	0x1022
+#define HPET_VENDID_INTEL	0x8086
+#define HPET_VENDID_NVIDIA	0x10de
+#define HPET_VENDID_SW		0x1166
 #define	HPET_CAP_LEG_RT		0x00008000
 #define	HPET_CAP_COUNT_SIZE	0x00002000 /* 1 = 64-bit, 0 = 32-bit */
 #define	HPET_CAP_NUM_TIM	0x00001f00
