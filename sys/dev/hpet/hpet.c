@@ -240,7 +240,7 @@ hpet_intr(void *arg)
 }
 
 static ACPI_STATUS
-hpet_find(ACPI_HANDLE handle, UINT32 level, void *context,
+hpet_acpi_find(ACPI_HANDLE handle, UINT32 level, void *context,
     void **status)
 {
 	char 		**ids;
@@ -278,7 +278,7 @@ hpet_find_irq_rid(device_t dev, u_long start, u_long end)
 
 /* Discover the HPET via the ACPI table of the same name. */
 static void 
-hpet_identify(driver_t *driver, device_t parent)
+hpet_acpi_identify(driver_t *driver, device_t parent)
 {
 	ACPI_TABLE_HPET *hpet;
 	ACPI_STATUS	status;
@@ -296,7 +296,7 @@ hpet_identify(driver_t *driver, device_t parent)
 		/* Search for HPET device with same ID. */
 		found = 0;
 		AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT,
-		    100, hpet_find, NULL, (void *)(uintptr_t)hpet->Sequence, (void *)&found);
+		    100, hpet_acpi_find, NULL, (void *)(uintptr_t)hpet->Sequence, (void *)&found);
 		/* If found - let it be probed in normal way. */
 		if (found)
 			continue;
@@ -312,7 +312,7 @@ hpet_identify(driver_t *driver, device_t parent)
 }
 
 static int
-hpet_probe(device_t dev)
+hpet_acpi_probe(device_t dev)
 {
 	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
 
@@ -327,21 +327,15 @@ hpet_probe(device_t dev)
 }
 
 static int
-hpet_attach(device_t dev)
+hpet_attach(struct hpet_softc *sc)
 {
-	struct hpet_softc *sc;
+	device_t dev = sc->dev;
 	struct hpet_timer *t;
 	int i, j, num_msi, num_timers, num_percpu_et, num_percpu_t, cur_cpu;
 	int pcpu_master;
 	static int maxhpetet = 0;
 	uint32_t val, val2, cvectors, dvectors;
 	uint16_t vendor, rev;
-
-	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
-
-	sc = device_get_softc(dev);
-	sc->dev = dev;
-	sc->handle = acpi_get_handle(dev);
 
 	sc->mem_rid = 0;
 	sc->mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &sc->mem_rid,
@@ -659,7 +653,21 @@ hpet_attach(device_t dev)
 }
 
 static int
-hpet_detach(device_t dev)
+hpet_acpi_attach(device_t dev)
+{
+	struct hpet_softc *sc;
+
+	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
+
+	sc = device_get_softc(dev);
+	sc->dev = dev;
+	sc->handle = acpi_get_handle(dev);
+
+	return hpet_attach(sc);
+}
+
+static int
+hpet_acpi_detach(device_t dev)
 {
 	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
 
@@ -793,12 +801,12 @@ hpet_remap_intr(device_t dev, device_t child, u_int irq)
 }
 #endif
 
-static device_method_t hpet_methods[] = {
+static device_method_t hpet_acpi_methods[] = {
 	/* Device interface */
-	DEVMETHOD(device_identify, hpet_identify),
-	DEVMETHOD(device_probe, hpet_probe),
-	DEVMETHOD(device_attach, hpet_attach),
-	DEVMETHOD(device_detach, hpet_detach),
+	DEVMETHOD(device_identify, hpet_acpi_identify),
+	DEVMETHOD(device_probe, hpet_acpi_probe),
+	DEVMETHOD(device_attach, hpet_acpi_attach),
+	DEVMETHOD(device_detach, hpet_acpi_detach),
 	DEVMETHOD(device_suspend, hpet_suspend),
 	DEVMETHOD(device_resume, hpet_resume),
 
@@ -809,11 +817,11 @@ static device_method_t hpet_methods[] = {
 	{0, 0}
 };
 
-static driver_t	hpet_driver = {
+static driver_t	hpet_acpi_driver = {
 	"hpet",
-	hpet_methods,
+	hpet_acpi_methods,
 	sizeof(struct hpet_softc),
 };
 
-DRIVER_MODULE(hpet, acpi, hpet_driver, hpet_devclass, 0, 0);
+DRIVER_MODULE(hpet, acpi, hpet_acpi_driver, hpet_devclass, 0, 0);
 MODULE_DEPEND(hpet, acpi, 1, 1, 1);
