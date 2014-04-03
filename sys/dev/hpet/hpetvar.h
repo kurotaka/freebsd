@@ -67,4 +67,12 @@ struct hpet_softc {
 	int			num_timers;
 };
 
+extern devclass_t hpet_devclass;
+
+int hpet_attach(struct hpet_softc *);
+device_suspend_t hpet_suspend;
+device_resume_t hpet_resume;
+#ifdef DEV_APIC
+bus_remap_intr_t hpet_remap_intr;
+#endif /* DEV_APIC */
 #endif /* !__HPETVAR_H__ */

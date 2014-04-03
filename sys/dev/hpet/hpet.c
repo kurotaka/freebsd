@@ -28,7 +28,6 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#include "opt_acpi.h"
 #if defined(__amd64__) || defined(__ia64__)
 #define	DEV_APIC
 #else
@@ -38,6 +37,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/bus.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
+#include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/rman.h>
 #include <sys/time.h>
@@ -46,10 +46,8 @@ __FBSDID("$FreeBSD$");
 #include <sys/timeet.h>
 #include <sys/timetc.h>
 
-#include <contrib/dev/acpica/include/acpi.h>
-#include <contrib/dev/acpica/include/accommon.h>
+#include <machine/bus.h>
 
-#include <dev/acpica/acpivar.h>
 #include <dev/hpet/hpetreg.h>
 #include <dev/hpet/hpetvar.h>
 
@@ -57,18 +55,10 @@ __FBSDID("$FreeBSD$");
 #include "pcib_if.h"
 #endif
 
-ACPI_SERIAL_DECL(hpet, "ACPI HPET support");
-
-static devclass_t hpet_devclass;
-
-/* ACPI CA debugging */
-#define _COMPONENT	ACPI_TIMER
-ACPI_MODULE_NAME("HPET")
+devclass_t hpet_devclass;
 
 static u_int hpet_get_timecount(struct timecounter *tc);
 static void hpet_test(struct hpet_softc *sc);
-
-static char *hpet_ids[] = { "PNP0103", NULL };
 
 static u_int
 hpet_get_timecount(struct timecounter *tc)
@@ -239,26 +229,6 @@ hpet_intr(void *arg)
 	return (FILTER_STRAY);
 }
 
-static ACPI_STATUS
-hpet_acpi_find(ACPI_HANDLE handle, UINT32 level, void *context,
-    void **status)
-{
-	char 		**ids;
-	uint32_t	id = (uint32_t)(uintptr_t)context;
-	uint32_t	uid = 0;
-
-	for (ids = hpet_ids; *ids != NULL; ids++) {
-		if (acpi_MatchHid(handle, *ids))
-		        break;
-	}
-	if (*ids == NULL)
-		return (AE_OK);
-	if (ACPI_FAILURE(acpi_GetInteger(handle, "_UID", &uid)) ||
-	    id == uid)
-		*((int *)status) = 1;
-	return (AE_OK);
-}
-
 /*
  * Find an existing IRQ resource that matches the requested IRQ range
  * and return its RID.  If one is not found, use a new RID.
@@ -276,57 +246,7 @@ hpet_find_irq_rid(device_t dev, u_long start, u_long end)
 	}
 }
 
-/* Discover the HPET via the ACPI table of the same name. */
-static void 
-hpet_acpi_identify(driver_t *driver, device_t parent)
-{
-	ACPI_TABLE_HPET *hpet;
-	ACPI_STATUS	status;
-	device_t	child;
-	int 		i, found;
-
-	/* Only one HPET device can be added. */
-	if (devclass_get_device(hpet_devclass, 0))
-		return;
-	for (i = 1; ; i++) {
-		/* Search for HPET table. */
-		status = AcpiGetTable(ACPI_SIG_HPET, i, (ACPI_TABLE_HEADER **)&hpet);
-		if (ACPI_FAILURE(status))
-			return;
-		/* Search for HPET device with same ID. */
-		found = 0;
-		AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT,
-		    100, hpet_acpi_find, NULL, (void *)(uintptr_t)hpet->Sequence, (void *)&found);
-		/* If found - let it be probed in normal way. */
-		if (found)
-			continue;
-		/* If not - create it from table info. */
-		child = BUS_ADD_CHILD(parent, 2, "hpet", 0);
-		if (child == NULL) {
-			printf("%s: can't add child\n", __func__);
-			continue;
-		}
-		bus_set_resource(child, SYS_RES_MEMORY, 0, hpet->Address.Address,
-		    HPET_MEM_WIDTH);
-	}
-}
-
-static int
-hpet_acpi_probe(device_t dev)
-{
-	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
-
-	if (acpi_disabled("hpet"))
-		return (ENXIO);
-	if (acpi_get_handle(dev) != NULL &&
-	    ACPI_ID_PROBE(device_get_parent(dev), dev, hpet_ids) == NULL)
-		return (ENXIO);
-
-	device_set_desc(dev, "High Precision Event Timer");
-	return (0);
-}
-
-static int
+int
 hpet_attach(struct hpet_softc *sc)
 {
 	device_t dev = sc->dev;
@@ -652,29 +572,7 @@ hpet_attach(struct hpet_softc *sc)
 	return (0);
 }
 
-static int
-hpet_acpi_attach(device_t dev)
-{
-	struct hpet_softc *sc;
-
-	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
-
-	sc = device_get_softc(dev);
-	sc->dev = dev;
-
-	return hpet_attach(sc);
-}
-
-static int
-hpet_acpi_detach(device_t dev)
-{
-	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
-
-	/* XXX Without a tc_remove() function, we can't detach. */
-	return (EBUSY);
-}
-
-static int
+int
 hpet_suspend(device_t dev)
 {
 //	struct hpet_softc *sc;
@@ -690,7 +588,7 @@ hpet_suspend(device_t dev)
 	return (0);
 }
 
-static int
+int
 hpet_resume(device_t dev)
 {
 	struct hpet_softc *sc;
@@ -772,7 +670,7 @@ hpet_test(struct hpet_softc *sc)
 }
 
 #ifdef DEV_APIC
-static int
+int
 hpet_remap_intr(device_t dev, device_t child, u_int irq)
 {
 	struct hpet_softc *sc = device_get_softc(dev);
@@ -799,28 +697,3 @@ hpet_remap_intr(device_t dev, device_t child, u_int irq)
 	return (ENOENT);
 }
 #endif
-
-static device_method_t hpet_acpi_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_identify, hpet_acpi_identify),
-	DEVMETHOD(device_probe, hpet_acpi_probe),
-	DEVMETHOD(device_attach, hpet_acpi_attach),
-	DEVMETHOD(device_detach, hpet_acpi_detach),
-	DEVMETHOD(device_suspend, hpet_suspend),
-	DEVMETHOD(device_resume, hpet_resume),
-
-#ifdef DEV_APIC
-	DEVMETHOD(bus_remap_intr, hpet_remap_intr),
-#endif
-
-	{0, 0}
-};
-
-static driver_t	hpet_acpi_driver = {
-	"hpet",
-	hpet_acpi_methods,
-	sizeof(struct hpet_softc),
-};
-
-DRIVER_MODULE(hpet, acpi, hpet_acpi_driver, hpet_devclass, 0, 0);
-MODULE_DEPEND(hpet, acpi, 1, 1, 1);

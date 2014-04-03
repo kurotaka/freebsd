@@ -1186,6 +1186,7 @@ dev/hme/if_hme.c		optional hme
 dev/hme/if_hme_pci.c		optional hme pci
 dev/hme/if_hme_sbus.c		optional hme sbus
 dev/hpet/hpet.c			optional acpi
+dev/hpet/hpet_acpi.c		optional acpi
 dev/hptiop/hptiop.c		optional hptiop scbus
 dev/hwpmc/hwpmc_logging.c	optional hwpmc
 dev/hwpmc/hwpmc_mod.c		optional hwpmc
