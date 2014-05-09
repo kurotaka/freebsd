@@ -158,6 +158,8 @@ struct ctl_be_block_lun {
 	uint64_t size_bytes;
 	uint32_t blocksize;
 	int blocksize_shift;
+	uint16_t pblockexp;
+	uint16_t pblockoff;
 	struct ctl_be_block_softc *softc;
 	struct devstat *disk_stats;
 	ctl_be_block_lun_flags flags;
@@ -175,9 +177,7 @@ struct ctl_be_block_lun {
  * Overall softc structure for the block backend module.
  */
 struct ctl_be_block_softc {
-	STAILQ_HEAD(, ctl_be_block_io)   beio_free_queue;
 	struct mtx			 lock;
-	int				 prealloc_beio;
 	int				 num_disks;
 	STAILQ_HEAD(, ctl_block_disk)	 disk_list;
 	int				 num_luns;
@@ -207,7 +207,6 @@ struct ctl_be_block_io {
 	uint64_t			io_offset;
 	struct ctl_be_block_softc	*softc;
 	struct ctl_be_block_lun		*lun;
-	STAILQ_ENTRY(ctl_be_block_io)	links;
 };
 
 static int cbb_num_threads = 14;
@@ -219,10 +218,6 @@ SYSCTL_INT(_kern_cam_ctl_block, OID_AUTO, num_threads, CTLFLAG_RW,
 
 static struct ctl_be_block_io *ctl_alloc_beio(struct ctl_be_block_softc *softc);
 static void ctl_free_beio(struct ctl_be_block_io *beio);
-static int ctl_grow_beio(struct ctl_be_block_softc *softc, int count);
-#if 0
-static void ctl_shrink_beio(struct ctl_be_block_softc *softc);
-#endif
 static void ctl_complete_beio(struct ctl_be_block_io *beio);
 static int ctl_be_block_move_done(union ctl_io *io);
 static void ctl_be_block_biodone(struct bio *bio);
@@ -284,68 +279,24 @@ static struct ctl_backend_driver ctl_be_block_driver =
 MALLOC_DEFINE(M_CTLBLK, "ctlblk", "Memory used for CTL block backend");
 CTL_BACKEND_DECLARE(cbb, ctl_be_block_driver);
 
+static uma_zone_t beio_zone;
+
 static struct ctl_be_block_io *
 ctl_alloc_beio(struct ctl_be_block_softc *softc)
 {
 	struct ctl_be_block_io *beio;
-	int count;
 
-	mtx_lock(&softc->lock);
-
-	beio = STAILQ_FIRST(&softc->beio_free_queue);
-	if (beio != NULL) {
-		STAILQ_REMOVE(&softc->beio_free_queue, beio,
-			      ctl_be_block_io, links);
-	}
-	mtx_unlock(&softc->lock);
-
-	if (beio != NULL) {
-		bzero(beio, sizeof(*beio));
-		beio->softc = softc;
-		return (beio);
-	}
-
-	for (;;) {
-
-		count = ctl_grow_beio(softc, /*count*/ 10);
-
-		/*
-		 * This shouldn't be possible, since ctl_grow_beio() uses a
-		 * blocking malloc.
-		 */
-		if (count == 0)
-			return (NULL);
-
-		/*
-		 * Since we have to drop the lock when we're allocating beio
-		 * structures, it's possible someone else can come along and
-		 * allocate the beio's we've just allocated.
-		 */
-		mtx_lock(&softc->lock);
-		beio = STAILQ_FIRST(&softc->beio_free_queue);
-		if (beio != NULL) {
-			STAILQ_REMOVE(&softc->beio_free_queue, beio,
-				      ctl_be_block_io, links);
-		}
-		mtx_unlock(&softc->lock);
-
-		if (beio != NULL) {
-			bzero(beio, sizeof(*beio));
-			beio->softc = softc;
-			break;
-		}
-	}
+	beio = uma_zalloc(beio_zone, M_WAITOK | M_ZERO);
+	beio->softc = softc;
 	return (beio);
 }
 
 static void
 ctl_free_beio(struct ctl_be_block_io *beio)
 {
-	struct ctl_be_block_softc *softc;
 	int duplicate_free;
 	int i;
 
-	softc = beio->softc;
 	duplicate_free = 0;
 
 	for (i = 0; i < beio->num_segs; i++) {
@@ -360,46 +311,9 @@ ctl_free_beio(struct ctl_be_block_io *beio)
 		printf("%s: %d duplicate frees out of %d segments\n", __func__,
 		       duplicate_free, beio->num_segs);
 	}
-	mtx_lock(&softc->lock);
-	STAILQ_INSERT_TAIL(&softc->beio_free_queue, beio, links);
-	mtx_unlock(&softc->lock);
+
+	uma_zfree(beio_zone, beio);
 }
-
-static int
-ctl_grow_beio(struct ctl_be_block_softc *softc, int count)
-{
-	int i;
-
-	for (i = 0; i < count; i++) {
-		struct ctl_be_block_io *beio;
-
-		beio = (struct ctl_be_block_io *)malloc(sizeof(*beio),
-							   M_CTLBLK,
-							   M_WAITOK | M_ZERO);
-		beio->softc = softc;
-		mtx_lock(&softc->lock);
-		STAILQ_INSERT_TAIL(&softc->beio_free_queue, beio, links);
-		mtx_unlock(&softc->lock);
-	}
-
-	return (i);
-}
-
-#if 0
-static void
-ctl_shrink_beio(struct ctl_be_block_softc *softc)
-{
-	struct ctl_be_block_io *beio, *beio_tmp;
-
-	mtx_lock(&softc->lock);
-	STAILQ_FOREACH_SAFE(beio, &softc->beio_free_queue, links, beio_tmp) {
-		STAILQ_REMOVE(&softc->beio_free_queue, beio,
-			      ctl_be_block_io, links);
-		free(beio, M_CTLBLK);
-	}
-	mtx_unlock(&softc->lock);
-}
-#endif
 
 static void
 ctl_complete_beio(struct ctl_be_block_io *beio)
@@ -941,16 +855,7 @@ ctl_be_block_cw_dispatch(struct ctl_be_block_lun *be_lun,
 
 	softc = be_lun->softc;
 	beio = ctl_alloc_beio(softc);
-	if (beio == NULL) {
-		/*
-		 * This should not happen.  ctl_alloc_beio() will call
-		 * ctl_grow_beio() with a blocking malloc as needed.
-		 * A malloc with M_WAITOK should not fail.
-		 */
-		ctl_set_busy(&io->scsiio);
-		ctl_done(io);
-		return;
-	}
+	KASSERT(beio != NULL, ("ctl_alloc_beio() failed"));
 
 	beio->io = io;
 	beio->softc = softc;
@@ -1021,16 +926,7 @@ ctl_be_block_dispatch(struct ctl_be_block_lun *be_lun,
 	}
 
 	beio = ctl_alloc_beio(softc);
-	if (beio == NULL) {
-		/*
-		 * This should not happen.  ctl_alloc_beio() will call
-		 * ctl_grow_beio() with a blocking malloc as needed.
-		 * A malloc with M_WAITOK should not fail.
-		 */
-		ctl_set_busy(&io->scsiio);
-		ctl_done(io);
-		return;
-	}
+	KASSERT(beio != NULL, ("ctl_alloc_beio() failed"));
 
 	beio->io = io;
 	beio->softc = softc;
@@ -1376,6 +1272,7 @@ ctl_be_block_open_dev(struct ctl_be_block_lun *be_lun, struct ctl_lun_req *req)
 	struct cdev		     *dev;
 	struct cdevsw		     *devsw;
 	int			      error;
+	off_t			      ps, pss, po, pos;
 
 	params = &req->reqdata.create;
 
@@ -1473,6 +1370,24 @@ ctl_be_block_open_dev(struct ctl_be_block_lun *be_lun, struct ctl_lun_req *req)
 		be_lun->size_bytes = params->lun_size_bytes;
 	}
 
+	error = devsw->d_ioctl(dev, DIOCGSTRIPESIZE,
+			       (caddr_t)&ps, FREAD, curthread);
+	if (error)
+		ps = po = 0;
+	else {
+		error = devsw->d_ioctl(dev, DIOCGSTRIPEOFFSET,
+				       (caddr_t)&po, FREAD, curthread);
+		if (error)
+			po = 0;
+	}
+	pss = ps / be_lun->blocksize;
+	pos = po / be_lun->blocksize;
+	if ((pss > 0) && (pss * be_lun->blocksize == ps) && (pss >= pos) &&
+	    ((pss & (pss - 1)) == 0) && (pos * be_lun->blocksize == po)) {
+		be_lun->pblockexp = fls(pss) - 1;
+		be_lun->pblockoff = (pss - pos) % pss;
+	}
+
 	return (0);
 }
 
@@ -1497,6 +1412,7 @@ ctl_be_block_close(struct ctl_be_block_lun *be_lun)
 			vfs_is_locked = VFS_LOCK_GIANT(be_lun->vn->v_mount);
 			break;
 		case CTL_BE_BLOCK_NONE:
+			break;
 		default:
 			panic("Unexpected backend type.");
 			break;
@@ -1516,6 +1432,7 @@ ctl_be_block_close(struct ctl_be_block_lun *be_lun)
 			}
 			break;
 		case CTL_BE_BLOCK_NONE:
+			break;
 		default:
 			panic("Unexpected backend type.");
 			break;
@@ -1605,7 +1522,7 @@ ctl_be_block_open(struct ctl_be_block_softc *softc,
 	} else {
 		error = EINVAL;
 		snprintf(req->error_str, sizeof(req->error_str),
-			 "%s is not a disk or file", be_lun->dev_path);
+			 "%s is not a disk or plain file", be_lun->dev_path);
 	}
 	VOP_UNLOCK(be_lun->vn, 0);
 	VFS_UNLOCK_GIANT(vfs_is_locked);
@@ -1701,6 +1618,8 @@ ctl_be_block_create(struct ctl_be_block_softc *softc, struct ctl_lun_req *req)
 		 * For processor devices, we don't have any size.
 		 */
 		be_lun->blocksize = 0;
+		be_lun->pblockexp = 0;
+		be_lun->pblockoff = 0;
 		be_lun->size_blocks = 0;
 		be_lun->size_bytes = 0;
 		be_lun->ctl_be_lun.maxlba = 0;
@@ -1751,6 +1670,8 @@ ctl_be_block_create(struct ctl_be_block_softc *softc, struct ctl_lun_req *req)
 	be_lun->ctl_be_lun.flags = CTL_LUN_FLAG_PRIMARY;
 	be_lun->ctl_be_lun.be_lun = be_lun;
 	be_lun->ctl_be_lun.blocksize = be_lun->blocksize;
+	be_lun->ctl_be_lun.pblockexp = be_lun->pblockexp;
+	be_lun->ctl_be_lun.pblockoff = be_lun->pblockoff;
 	/* Tell the user the blocksize we ended up using */
 	params->blocksize_bytes = be_lun->blocksize;
 	if (params->flags & CTL_LUN_FLAG_ID_REQ) {
@@ -2346,10 +2267,10 @@ ctl_be_block_init(void)
 	retval = 0;
 
 	mtx_init(&softc->lock, "ctlblk", NULL, MTX_DEF);
-	STAILQ_INIT(&softc->beio_free_queue);
+	beio_zone = uma_zcreate("beio", sizeof(struct ctl_be_block_io),
+	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
 	STAILQ_INIT(&softc->disk_list);
 	STAILQ_INIT(&softc->lun_list);
-	ctl_grow_beio(softc, 200);
 
 	return (retval);
 }

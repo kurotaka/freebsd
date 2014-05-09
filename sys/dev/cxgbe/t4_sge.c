@@ -38,6 +38,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/kdb.h>
 #include <sys/malloc.h>
 #include <sys/queue.h>
+#include <sys/sbuf.h>
 #include <sys/taskqueue.h>
 #include <sys/sysctl.h>
 #include <sys/smp.h>
@@ -50,24 +51,13 @@ __FBSDID("$FreeBSD$");
 #include <netinet/ip6.h>
 #include <netinet/tcp.h>
 #include <machine/md_var.h>
+#include <vm/vm.h>
+#include <vm/pmap.h>
 
 #include "common/common.h"
 #include "common/t4_regs.h"
 #include "common/t4_regs_values.h"
 #include "common/t4_msg.h"
-
-struct fl_buf_info {
-	int size;
-	int type;
-	uma_zone_t zone;
-};
-
-/* Filled up by t4_sge_modload */
-static struct fl_buf_info fl_buf_info[FL_BUF_SIZES];
-
-#define FL_BUF_SIZE(x)	(fl_buf_info[x].size)
-#define FL_BUF_TYPE(x)	(fl_buf_info[x].type)
-#define FL_BUF_ZONE(x)	(fl_buf_info[x].zone)
 
 #ifdef T4_PKT_TIMESTAMP
 #define RX_COPY_THRESHOLD (MINCLSIZE - 8)
@@ -85,7 +75,8 @@ TUNABLE_INT("hw.cxgbe.fl_pktshift", &fl_pktshift);
 /*
  * Pad ethernet payload up to this boundary.
  * -1: driver should figure out a good value.
- *  Any power of 2, from 32 to 4096 (both inclusive) is a valid value.
+ *  0: disable padding.
+ *  Any power of 2 from 32 to 4096 (both inclusive) is also a valid value.
  */
 static int fl_pad = -1;
 TUNABLE_INT("hw.cxgbe.fl_pad", &fl_pad);
@@ -106,6 +97,54 @@ TUNABLE_INT("hw.cxgbe.spg_len", &spg_len);
  */
 static int cong_drop = 0;
 TUNABLE_INT("hw.cxgbe.cong_drop", &cong_drop);
+
+/*
+ * Deliver multiple frames in the same free list buffer if they fit.
+ * -1: let the driver decide whether to enable buffer packing or not.
+ *  0: disable buffer packing.
+ *  1: enable buffer packing.
+ */
+static int buffer_packing = -1;
+TUNABLE_INT("hw.cxgbe.buffer_packing", &buffer_packing);
+
+/*
+ * Start next frame in a packed buffer at this boundary.
+ * -1: driver should figure out a good value.
+ * T4:
+ * ---
+ * if fl_pad != 0
+ * 	value specified here will be overridden by fl_pad.
+ * else
+ * 	power of 2 from 32 to 4096 (both inclusive) is a valid value here.
+ * T5:
+ * ---
+ * 16, or a power of 2 from 64 to 4096 (both inclusive) is a valid value.
+ */
+static int fl_pack = -1;
+static int t4_fl_pack;
+static int t5_fl_pack;
+TUNABLE_INT("hw.cxgbe.fl_pack", &fl_pack);
+
+/*
+ * Allow the driver to create mbuf(s) in a cluster allocated for rx.
+ * 0: never; always allocate mbufs from the zone_mbuf UMA zone.
+ * 1: ok to create mbuf(s) within a cluster if there is room.
+ */
+static int allow_mbufs_in_cluster = 1;
+TUNABLE_INT("hw.cxgbe.allow_mbufs_in_cluster", &allow_mbufs_in_cluster);
+
+/*
+ * Largest rx cluster size that the driver is allowed to allocate.
+ */
+static int largest_rx_cluster = MJUM16BYTES;
+TUNABLE_INT("hw.cxgbe.largest_rx_cluster", &largest_rx_cluster);
+
+/*
+ * Size of cluster allocation that's most likely to succeed.  The driver will
+ * fall back to this size if it fails to allocate clusters larger than this.
+ */
+static int safest_rx_cluster = PAGE_SIZE;
+TUNABLE_INT("hw.cxgbe.safest_rx_cluster", &safest_rx_cluster);
 
 /* Used to track coalesced tx work request */
 struct txpkts {
@@ -128,7 +167,8 @@ static struct mbuf *get_fl_payload(struct adapter *, struct sge_fl *, uint32_t,
 static int t4_eth_rx(struct sge_iq *, const struct rss_header *, struct mbuf *);
 static inline void init_iq(struct sge_iq *, struct adapter *, int, int, int,
     int);
-static inline void init_fl(struct sge_fl *, int, int, char *);
+static inline void init_fl(struct adapter *, struct sge_fl *, int, int, int,
+    char *);
 static inline void init_eq(struct sge_eq *, int, int, uint8_t, uint16_t,
     char *);
 static int alloc_ring(struct adapter *, size_t, bus_dma_tag_t *, bus_dmamap_t *,
@@ -138,6 +178,8 @@ static int free_ring(struct adapter *, bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
 static int alloc_iq_fl(struct port_info *, struct sge_iq *, struct sge_fl *,
     int, int);
 static int free_iq_fl(struct port_info *, struct sge_iq *, struct sge_fl *);
+static void add_fl_sysctls(struct sysctl_ctx_list *, struct sysctl_oid *,
+    struct sge_fl *);
 static int alloc_fwq(struct adapter *);
 static int free_fwq(struct adapter *);
 static int alloc_mgmtq(struct adapter *);
@@ -170,8 +212,9 @@ static inline void ring_fl_db(struct adapter *, struct sge_fl *);
 static int refill_fl(struct adapter *, struct sge_fl *, int);
 static void refill_sfl(void *);
 static int alloc_fl_sdesc(struct sge_fl *);
-static void free_fl_sdesc(struct sge_fl *);
-static void set_fl_tag_idx(struct sge_fl *, int);
+static void free_fl_sdesc(struct adapter *, struct sge_fl *);
+static void find_best_refill_source(struct adapter *, struct sge_fl *, int);
+static void find_safe_refill_source(struct adapter *, struct sge_fl *);
 static void add_fl_to_sfl(struct adapter *, struct sge_fl *);
 
 static int get_pkt_sgl(struct sge_txq *, struct mbuf **, struct sgl *, int);
@@ -196,29 +239,23 @@ static int handle_fw_msg(struct sge_iq *, const struct rss_header *,
     struct mbuf *);
 
 static int sysctl_uint16(SYSCTL_HANDLER_ARGS);
+static int sysctl_bufsizes(SYSCTL_HANDLER_ARGS);
 
 /*
- * Called on MOD_LOAD.  Fills up fl_buf_info[] and validates/calculates the SGE
- * tunables.
+ * Called on MOD_LOAD.  Validates and calculates the SGE tunables.
  */
 void
 t4_sge_modload(void)
 {
-	int i;
-	int bufsize[FL_BUF_SIZES] = {
-		MCLBYTES,
-#if MJUMPAGESIZE != MCLBYTES
-		MJUMPAGESIZE,
-#endif
-		MJUM9BYTES,
-		MJUM16BYTES
-	};
+	int pad;
 
-	for (i = 0; i < FL_BUF_SIZES; i++) {
-		FL_BUF_SIZE(i) = bufsize[i];
-		FL_BUF_TYPE(i) = m_gettype(bufsize[i]);
-		FL_BUF_ZONE(i) = m_getzone(bufsize[i]);
-	}
+	/* set pad to a reasonable powerof2 between 16 and 4096 (inclusive) */
+#if defined(__i386__) || defined(__amd64__)
+	pad = max(cpu_clflush_line_size, 16);
+#else
+	pad = max(CACHE_LINE_SIZE, 16);
+#endif
+	pad = min(pad, 4096);
 
 	if (fl_pktshift < 0 || fl_pktshift > 7) {
 		printf("Invalid hw.cxgbe.fl_pktshift value (%d),"
@@ -226,22 +263,34 @@ t4_sge_modload(void)
 		fl_pktshift = 2;
 	}
 
-	if (fl_pad < 32 || fl_pad > 4096 || !powerof2(fl_pad)) {
-		int pad;
-
-#if defined(__i386__) || defined(__amd64__)
-		pad = max(cpu_clflush_line_size, 32);
-#else
-		pad = max(CACHE_LINE_SIZE, 32);
-#endif
-		pad = min(pad, 4096);
+	if (fl_pad != 0 &&
+	    (fl_pad < 32 || fl_pad > 4096 || !powerof2(fl_pad))) {
 
 		if (fl_pad != -1) {
 			printf("Invalid hw.cxgbe.fl_pad value (%d),"
-			    " using %d instead.\n", fl_pad, pad);
+			    " using %d instead.\n", fl_pad, max(pad, 32));
 		}
-		fl_pad = pad;
+		fl_pad = max(pad, 32);
 	}
+
+	/*
+	 * T4 has the same pad and pack boundary.  If a pad boundary is set,
+	 * pack boundary must be set to the same value.  Otherwise take the
+	 * specified value or auto-calculate something reasonable.
+	 */
+	if (fl_pad)
+		t4_fl_pack = fl_pad;
+	else if (fl_pack < 32 || fl_pack > 4096 || !powerof2(fl_pack))
+		t4_fl_pack = max(pad, 32);
+	else
+		t4_fl_pack = fl_pack;
+
+	/* T5's pack boundary is independent of the pad boundary. */
+	if (fl_pack < 16 || fl_pack == 32 || fl_pack > 4096 ||
+	    !powerof2(fl_pack))
+	       t5_fl_pack = max(pad, CACHE_LINE_SIZE);
+	else
+	       t5_fl_pack = fl_pack;
 
 	if (spg_len != 64 && spg_len != 128) {
 		int len;
@@ -289,16 +338,44 @@ t4_tweak_chip_settings(struct adapter *sc)
 	int timer_max = M_TIMERVALUE0 * 1000 / sc->params.vpd.cclk;
 	int intr_pktcount[SGE_NCOUNTERS] = {1, 8, 16, 32}; /* 63 max */
 	uint16_t indsz = min(RX_COPY_THRESHOLD - 1, M_INDICATESIZE);
+	static int sge_flbuf_sizes[] = {
+		MCLBYTES,
+#if MJUMPAGESIZE != MCLBYTES
+		MJUMPAGESIZE,
+		MJUMPAGESIZE - CL_METADATA_SIZE,
+		MJUMPAGESIZE - 2 * MSIZE - CL_METADATA_SIZE,
+#endif
+		MJUM9BYTES,
+		MJUM16BYTES,
+		MCLBYTES - MSIZE - CL_METADATA_SIZE,
+		MJUM9BYTES - CL_METADATA_SIZE,
+		MJUM16BYTES - CL_METADATA_SIZE,
+	};
 
 	KASSERT(sc->flags & MASTER_PF,
 	    ("%s: trying to change chip settings when not master.", __func__));
 
-	m = V_PKTSHIFT(M_PKTSHIFT) | F_RXPKTCPLMODE |
-	    V_INGPADBOUNDARY(M_INGPADBOUNDARY) | F_EGRSTATUSPAGESIZE;
+	m = V_PKTSHIFT(M_PKTSHIFT) | F_RXPKTCPLMODE | F_EGRSTATUSPAGESIZE;
 	v = V_PKTSHIFT(fl_pktshift) | F_RXPKTCPLMODE |
-	    V_INGPADBOUNDARY(ilog2(fl_pad) - 5) |
 	    V_EGRSTATUSPAGESIZE(spg_len == 128);
+	if (is_t4(sc) && (fl_pad || buffer_packing)) {
+		/* t4_fl_pack has the correct value even when fl_pad = 0 */
+		m |= V_INGPADBOUNDARY(M_INGPADBOUNDARY);
+		v |= V_INGPADBOUNDARY(ilog2(t4_fl_pack) - 5);
+	} else if (is_t5(sc) && fl_pad) {
+		m |= V_INGPADBOUNDARY(M_INGPADBOUNDARY);
+		v |= V_INGPADBOUNDARY(ilog2(fl_pad) - 5);
+	}
 	t4_set_reg_field(sc, A_SGE_CONTROL, m, v);
+
+	if (is_t5(sc) && buffer_packing) {
+		m = V_INGPACKBOUNDARY(M_INGPACKBOUNDARY);
+		if (t5_fl_pack == 16)
+			v = V_INGPACKBOUNDARY(0);
+		else
+			v = V_INGPACKBOUNDARY(ilog2(t5_fl_pack) - 5);
+		t4_set_reg_field(sc, A_SGE_CONTROL2, m, v);
+	}
 
 	v = V_HOSTPAGESIZEPF0(PAGE_SHIFT - 10) |
 	    V_HOSTPAGESIZEPF1(PAGE_SHIFT - 10) |
@@ -310,9 +387,11 @@ t4_tweak_chip_settings(struct adapter *sc)
 	    V_HOSTPAGESIZEPF7(PAGE_SHIFT - 10);
 	t4_write_reg(sc, A_SGE_HOST_PAGE_SIZE, v);
 
-	for (i = 0; i < FL_BUF_SIZES; i++) {
+	KASSERT(nitems(sge_flbuf_sizes) <= SGE_FLBUF_SIZES,
+	    ("%s: hw buffer size table too big", __func__));
+	for (i = 0; i < min(nitems(sge_flbuf_sizes), SGE_FLBUF_SIZES); i++) {
 		t4_write_reg(sc, A_SGE_FL_BUFFER_SIZE0 + (4 * i),
-		    FL_BUF_SIZE(i));
+		    sge_flbuf_sizes[i]);
 	}
 
 	v = V_THRESHOLD_0(intr_pktcount[0]) | V_THRESHOLD_1(intr_pktcount[1]) |
@@ -367,26 +446,68 @@ t4_tweak_chip_settings(struct adapter *sc)
 }
 
 /*
+ * SGE wants the buffer to be at least 64B and then a multiple of the pad
+ * boundary or 16, whichever is greater.
+ */
+static inline int
+hwsz_ok(int hwsz)
+{
+	int mask = max(fl_pad, 16) - 1;
+
+	return (hwsz >= 64 && (hwsz & mask) == 0);
+}
+
+/*
  * XXX: driver really should be able to deal with unexpected settings.
  */
 int
 t4_read_chip_settings(struct adapter *sc)
 {
 	struct sge *s = &sc->sge;
-	int i, rc = 0;
+	int i, j, n, rc = 0;
 	uint32_t m, v, r;
 	uint16_t indsz = min(RX_COPY_THRESHOLD - 1, M_INDICATESIZE);
+	static int sw_buf_sizes[] = {	/* Sorted by size */
+		MCLBYTES,
+#if MJUMPAGESIZE != MCLBYTES
+		MJUMPAGESIZE,
+#endif
+		MJUM9BYTES,
+		MJUM16BYTES
+	};
+	struct sw_zone_info *swz, *safe_swz;
+	struct hw_buf_info *hwb;
 
-	m = V_PKTSHIFT(M_PKTSHIFT) | F_RXPKTCPLMODE |
-	    V_INGPADBOUNDARY(M_INGPADBOUNDARY) | F_EGRSTATUSPAGESIZE;
+	m = V_PKTSHIFT(M_PKTSHIFT) | F_RXPKTCPLMODE | F_EGRSTATUSPAGESIZE;
 	v = V_PKTSHIFT(fl_pktshift) | F_RXPKTCPLMODE |
-	    V_INGPADBOUNDARY(ilog2(fl_pad) - 5) |
 	    V_EGRSTATUSPAGESIZE(spg_len == 128);
+	if (is_t4(sc) && (fl_pad || buffer_packing)) {
+		m |= V_INGPADBOUNDARY(M_INGPADBOUNDARY);
+		v |= V_INGPADBOUNDARY(ilog2(t4_fl_pack) - 5);
+	} else if (is_t5(sc) && fl_pad) {
+		m |= V_INGPADBOUNDARY(M_INGPADBOUNDARY);
+		v |= V_INGPADBOUNDARY(ilog2(fl_pad) - 5);
+	}
 	r = t4_read_reg(sc, A_SGE_CONTROL);
 	if ((r & m) != v) {
 		device_printf(sc->dev, "invalid SGE_CONTROL(0x%x)\n", r);
 		rc = EINVAL;
 	}
+
+	if (is_t5(sc) && buffer_packing) {
+		m = V_INGPACKBOUNDARY(M_INGPACKBOUNDARY);
+		if (t5_fl_pack == 16)
+			v = V_INGPACKBOUNDARY(0);
+		else
+			v = V_INGPACKBOUNDARY(ilog2(t5_fl_pack) - 5);
+		r = t4_read_reg(sc, A_SGE_CONTROL2);
+		if ((r & m) != v) {
+			device_printf(sc->dev,
+			    "invalid SGE_CONTROL2(0x%x)\n", r);
+			rc = EINVAL;
+		}
+	}
+	s->pack_boundary = is_t4(sc) ? t4_fl_pack : t5_fl_pack;
 
 	v = V_HOSTPAGESIZEPF0(PAGE_SHIFT - 10) |
 	    V_HOSTPAGESIZEPF1(PAGE_SHIFT - 10) |
@@ -402,12 +523,91 @@ t4_read_chip_settings(struct adapter *sc)
 		rc = EINVAL;
 	}
 
-	for (i = 0; i < FL_BUF_SIZES; i++) {
-		v = t4_read_reg(sc, A_SGE_FL_BUFFER_SIZE0 + (4 * i));
-		if (v != FL_BUF_SIZE(i)) {
-			device_printf(sc->dev,
-			    "invalid SGE_FL_BUFFER_SIZE[%d](0x%x)\n", i, v);
-			rc = EINVAL;
+	/* Filter out unusable hw buffer sizes entirely (mark with -2). */
+	hwb = &s->hw_buf_info[0];
+	for (i = 0; i < nitems(s->hw_buf_info); i++, hwb++) {
+		r = t4_read_reg(sc, A_SGE_FL_BUFFER_SIZE0 + (4 * i));
+		hwb->size = r;
+		hwb->zidx = hwsz_ok(r) ? -1 : -2;
+		hwb->next = -1;
+	}
+
+	/*
+	 * Create a sorted list in decreasing order of hw buffer sizes (and so
+	 * increasing order of spare area) for each software zone.
+	 */
+	n = 0;	/* no usable buffer size to begin with */
+	swz = &s->sw_zone_info[0];
+	safe_swz = NULL;
+	for (i = 0; i < SW_ZONE_SIZES; i++, swz++) {
+		int8_t head = -1, tail = -1;
+
+		swz->size = sw_buf_sizes[i];
+		swz->zone = m_getzone(swz->size);
+		swz->type = m_gettype(swz->size);
+
+		if (swz->size == safest_rx_cluster)
+			safe_swz = swz;
+
+		hwb = &s->hw_buf_info[0];
+		for (j = 0; j < SGE_FLBUF_SIZES; j++, hwb++) {
+			if (hwb->zidx != -1 || hwb->size > swz->size)
+				continue;
+			hwb->zidx = i;
+			if (head == -1)
+				head = tail = j;
+			else if (hwb->size < s->hw_buf_info[tail].size) {
+				s->hw_buf_info[tail].next = j;
+				tail = j;
+			} else {
+				int8_t *cur;
+				struct hw_buf_info *t;
+
+				for (cur = &head; *cur != -1; cur = &t->next) {
+					t = &s->hw_buf_info[*cur];
+					if (hwb->size == t->size) {
+						hwb->zidx = -2;
+						break;
+					}
+					if (hwb->size > t->size) {
+						hwb->next = *cur;
+						*cur = j;
+						break;
+					}
+				}
+			}
+		}
+		swz->head_hwidx = head;
+		swz->tail_hwidx = tail;
+
+		if (tail != -1) {
+			n++;
+			if (swz->size - s->hw_buf_info[tail].size >=
+			    CL_METADATA_SIZE)
+				sc->flags |= BUF_PACKING_OK;
+		}
+	}
+	if (n == 0) {
+		device_printf(sc->dev, "no usable SGE FL buffer size.\n");
+		rc = EINVAL;
+	}
+
+	s->safe_hwidx1 = -1;
+	s->safe_hwidx2 = -1;
+	if (safe_swz != NULL) {
+		s->safe_hwidx1 = safe_swz->head_hwidx;
+		for (i = safe_swz->head_hwidx; i != -1; i = hwb->next) {
+			int spare;
+
+			hwb = &s->hw_buf_info[i];
+			spare = safe_swz->size - hwb->size;
+			if (spare < CL_METADATA_SIZE)
+				continue;
+			if (s->safe_hwidx2 == -1 ||
+			    spare == CL_METADATA_SIZE + MSIZE)
+				s->safe_hwidx2 = i;
+			if (spare >= CL_METADATA_SIZE + MSIZE)
+				break;
 		}
 	}
 
@@ -463,13 +663,22 @@ t4_read_chip_settings(struct adapter *sc)
 
 	r = t4_read_reg(sc, A_SGE_CONM_CTRL);
 	s->fl_starve_threshold = G_EGRTHRESHOLD(r) * 2 + 1;
+	if (is_t4(sc))
+		s->fl_starve_threshold2 = s->fl_starve_threshold;
+	else
+		s->fl_starve_threshold2 = G_EGRTHRESHOLDPACKING(r) * 2 + 1;
 
-	if (is_t5(sc)) {
-		r = t4_read_reg(sc, A_SGE_EGRESS_QUEUES_PER_PAGE_PF);
-		r >>= S_QUEUESPERPAGEPF0 +
-		    (S_QUEUESPERPAGEPF1 - S_QUEUESPERPAGEPF0) * sc->pf;
-		s->s_qpp = r & M_QUEUESPERPAGEPF0;
-	}
+	/* egress queues: log2 of # of doorbells per BAR2 page */
+	r = t4_read_reg(sc, A_SGE_EGRESS_QUEUES_PER_PAGE_PF);
+	r >>= S_QUEUESPERPAGEPF0 +
+	    (S_QUEUESPERPAGEPF1 - S_QUEUESPERPAGEPF0) * sc->pf;
+	s->eq_s_qpp = r & M_QUEUESPERPAGEPF0;
+
+	/* ingress queues: log2 of # of doorbells per BAR2 page */
+	r = t4_read_reg(sc, A_SGE_INGRESS_QUEUES_PER_PAGE_PF);
+	r >>= S_QUEUESPERPAGEPF0 +
+	    (S_QUEUESPERPAGEPF1 - S_QUEUESPERPAGEPF0) * sc->pf;
+	s->iq_s_qpp = r & M_QUEUESPERPAGEPF0;
 
 	t4_init_tp_params(sc);
 
@@ -494,6 +703,46 @@ t4_create_dma_tag(struct adapter *sc)
 	}
 
 	return (rc);
+}
+
+static inline int
+enable_buffer_packing(struct adapter *sc)
+{
+
+	if (sc->flags & BUF_PACKING_OK &&
+	    ((is_t5(sc) && buffer_packing) ||	/* 1 or -1 both ok for T5 */
+	    (is_t4(sc) && buffer_packing == 1)))
+		return (1);
+	return (0);
+}
+
+void
+t4_sge_sysctls(struct adapter *sc, struct sysctl_ctx_list *ctx,
+    struct sysctl_oid_list *children)
+{
+
+	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "buffer_sizes",
+	    CTLTYPE_STRING | CTLFLAG_RD, &sc->sge, 0, sysctl_bufsizes, "A",
+	    "freelist buffer sizes");
+
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "fl_pktshift", CTLFLAG_RD,
+	    NULL, fl_pktshift, "payload DMA offset in rx buffer (bytes)");
+
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "fl_pad", CTLFLAG_RD,
+	    NULL, fl_pad, "payload pad boundary (bytes)");
+
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "spg_len", CTLFLAG_RD,
+	    NULL, spg_len, "status page size (bytes)");
+
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "cong_drop", CTLFLAG_RD,
+	    NULL, cong_drop, "congestion drop setting");
+
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "buffer_packing", CTLFLAG_RD,
+	    NULL, enable_buffer_packing(sc),
+	    "pack multiple frames in one fl buffer");
+
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "fl_pack", CTLFLAG_RD,
+	    NULL, sc->sge.pack_boundary, "payload pack boundary (bytes)");
 }
 
 int
@@ -613,7 +862,7 @@ port_intr_iq(struct port_info *pi, int idx)
 #ifdef TCP_OFFLOAD
 	if (sc->flags & INTR_DIRECT) {
 		idx %= pi->nrxq + pi->nofldrxq;
-		
+
 		if (idx >= pi->nrxq) {
 			idx -= pi->nrxq;
 			iq = &s->ofld_rxq[pi->first_ofld_rxq + idx].iq;
@@ -644,29 +893,28 @@ port_intr_iq(struct port_info *pi, int idx)
 	return (iq);
 }
 
+/* Maximum payload that can be delivered with a single iq descriptor */
 static inline int
-mtu_to_bufsize(int mtu)
+mtu_to_max_payload(struct adapter *sc, int mtu, const int toe)
 {
-	int bufsize;
-
-	/* large enough for a frame even when VLAN extraction is disabled */
-	bufsize = ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN + mtu;
-	bufsize = roundup2(bufsize + fl_pktshift, fl_pad);
-
-	return (bufsize);
-}
+	int payload;
 
 #ifdef TCP_OFFLOAD
-static inline int
-mtu_to_bufsize_toe(struct adapter *sc, int mtu)
-{
-
-	if (sc->tt.rx_coalesce)
-		return (G_RXCOALESCESIZE(t4_read_reg(sc, A_TP_PARA_REG2)));
-
-	return (mtu);
-}
+	if (toe) {
+		payload = sc->tt.rx_coalesce ?
+		    G_RXCOALESCESIZE(t4_read_reg(sc, A_TP_PARA_REG2)) : mtu;
+	} else {
 #endif
+		/* large enough even when hw VLAN extraction is disabled */
+		payload = fl_pktshift + ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN +
+		    mtu;
+#ifdef TCP_OFFLOAD
+	}
+#endif
+	payload = roundup2(payload, fl_pad);
+
+	return (payload);
+}
 
 int
 t4_setup_port_queues(struct port_info *pi)
@@ -685,7 +933,7 @@ t4_setup_port_queues(struct port_info *pi)
 	struct ifnet *ifp = pi->ifp;
 	struct sysctl_oid *oid = device_get_sysctl_tree(pi->dev);
 	struct sysctl_oid_list *children = SYSCTL_CHILDREN(oid);
-	int bufsize;
+	int maxp, pack, mtu = ifp->if_mtu;
 
 	oid = SYSCTL_ADD_NODE(&pi->ctx, children, OID_AUTO, "rxq", CTLFLAG_RD,
 	    NULL, "rx queues");
@@ -706,7 +954,8 @@ t4_setup_port_queues(struct port_info *pi)
 	 * a) initialize iq and fl
 	 * b) allocate queue iff it will take direct interrupts.
 	 */
-	bufsize = mtu_to_bufsize(ifp->if_mtu);
+	maxp = mtu_to_max_payload(sc, mtu, 0);
+	pack = enable_buffer_packing(sc);
 	for_each_rxq(pi, i, rxq) {
 
 		init_iq(&rxq->iq, sc, pi->tmr_idx, pi->pktc_idx, pi->qsize_rxq,
@@ -714,7 +963,7 @@ t4_setup_port_queues(struct port_info *pi)
 
 		snprintf(name, sizeof(name), "%s rxq%d-fl",
 		    device_get_nameunit(pi->dev), i);
-		init_fl(&rxq->fl, pi->qsize_rxq / 8, bufsize, name);
+		init_fl(sc, &rxq->fl, pi->qsize_rxq / 8, maxp, pack, name);
 
 		if (sc->flags & INTR_DIRECT
 #ifdef TCP_OFFLOAD
@@ -730,7 +979,7 @@ t4_setup_port_queues(struct port_info *pi)
 	}
 
 #ifdef TCP_OFFLOAD
-	bufsize = mtu_to_bufsize_toe(sc, ifp->if_mtu);
+	maxp = mtu_to_max_payload(sc, mtu, 1);
 	for_each_ofld_rxq(pi, i, ofld_rxq) {
 
 		init_iq(&ofld_rxq->iq, sc, pi->tmr_idx, pi->pktc_idx,
@@ -738,7 +987,7 @@ t4_setup_port_queues(struct port_info *pi)
 
 		snprintf(name, sizeof(name), "%s ofld_rxq%d-fl",
 		    device_get_nameunit(pi->dev), i);
-		init_fl(&ofld_rxq->fl, pi->qsize_rxq / 8, bufsize, name);
+		init_fl(sc, &ofld_rxq->fl, pi->qsize_rxq / 8, maxp, pack, name);
 
 		if (sc->flags & INTR_DIRECT ||
 		    (sc->intr_count > 1 && pi->nofldrxq > pi->nrxq)) {
@@ -1013,6 +1262,8 @@ service_iq(struct sge_iq *iq, int budget)
 				    __func__, iq));
 
 				m0 = get_fl_payload(sc, fl, lq, &fl_bufs_used);
+				if (__predict_false(m0 == NULL))
+					goto process_iql;
 #ifdef T4_PKT_TIMESTAMP
 				/*
 				 * 60 bit timestamp for the payload is
@@ -1067,6 +1318,14 @@ service_iq(struct sge_iq *iq, int budget)
 				break;
 			}
 
+			if (fl_bufs_used >= 16) {
+				FL_LOCK(fl);
+				fl->needed += fl_bufs_used;
+				refill_fl(sc, fl, 32);
+				FL_UNLOCK(fl);
+				fl_bufs_used = 0;
+			}
+
 			iq_next(iq);
 			if (++ndescs == limit) {
 				t4_write_reg(sc, MYPF_REG(A_SGE_PF_GTS),
@@ -1075,19 +1334,12 @@ service_iq(struct sge_iq *iq, int budget)
 				    V_SEINTARM(V_QINTR_TIMER_IDX(X_TIMERREG_UPDATE_CIDX)));
 				ndescs = 0;
 
-				if (fl_bufs_used > 0) {
-					FL_LOCK(fl);
-					fl->needed += fl_bufs_used;
-					refill_fl(sc, fl, fl->cap / 8);
-					FL_UNLOCK(fl);
-					fl_bufs_used = 0;
-				}
-
 				if (budget)
 					return (EINPROGRESS);
 			}
 		}
 
+process_iql:
 		if (STAILQ_EMPTY(&iql))
 			break;
 
@@ -1124,7 +1376,7 @@ service_iq(struct sge_iq *iq, int budget)
 
 		FL_LOCK(fl);
 		fl->needed += fl_bufs_used;
-		starved = refill_fl(sc, fl, fl->cap / 4);
+		starved = refill_fl(sc, fl, 64);
 		FL_UNLOCK(fl);
 		if (__predict_false(starved != 0))
 			add_fl_to_sfl(sc, fl);
@@ -1133,13 +1385,144 @@ service_iq(struct sge_iq *iq, int budget)
 	return (0);
 }
 
+static inline int
+cl_has_metadata(struct sge_fl *fl, struct cluster_layout *cll)
+{
+	int rc = fl->flags & FL_BUF_PACKING || cll->region1 > 0;
+
+	if (rc)
+		MPASS(cll->region3 >= CL_METADATA_SIZE);
+
+	return (rc);
+}
+
+static inline struct cluster_metadata *
+cl_metadata(struct adapter *sc, struct sge_fl *fl, struct cluster_layout *cll,
+    caddr_t cl)
+{
+
+	if (cl_has_metadata(fl, cll)) {
+		struct sw_zone_info *swz = &sc->sge.sw_zone_info[cll->zidx];
+
+		return ((struct cluster_metadata *)(cl + swz->size) - 1);
+	}
+	return (NULL);
+}
+
+static void
+rxb_free(void *arg1, void *arg2)
+{
+	uma_zone_t zone = arg1;
+	caddr_t cl = arg2;
+
+	uma_zfree(zone, cl);
+}
+
+/*
+ * The mbuf returned by this function could be allocated from zone_mbuf or
+ * constructed in spare room in the cluster.
+ *
+ * The mbuf carries the payload in one of these ways
+ * a) frame inside the mbuf (mbuf from zone_mbuf)
+ * b) m_cljset (for clusters without metadata) zone_mbuf
+ * c) m_extaddref (cluster with metadata) inline mbuf
+ * d) m_extaddref (cluster with metadata) zone_mbuf
+ */
+static struct mbuf *
+get_scatter_segment(struct adapter *sc, struct sge_fl *fl, int total, int flags)
+{
+	struct mbuf *m;
+	struct fl_sdesc *sd = &fl->sdesc[fl->cidx];
+	struct cluster_layout *cll = &sd->cll;
+	struct sw_zone_info *swz = &sc->sge.sw_zone_info[cll->zidx];
+	struct hw_buf_info *hwb = &sc->sge.hw_buf_info[cll->hwidx];
+	struct cluster_metadata *clm = cl_metadata(sc, fl, cll, sd->cl);
+	int len, padded_len;
+	caddr_t payload;
+
+	len = min(total, hwb->size - fl->rx_offset);
+	padded_len = roundup2(len, fl_pad);
+	payload = sd->cl + cll->region1 + fl->rx_offset;
+
+	if (sc->sc_do_rxcopy && len < RX_COPY_THRESHOLD) {
+
+		/*
+		 * Copy payload into a freshly allocated mbuf.
+		 */
+
+		m = flags & M_PKTHDR ?
+		    m_gethdr(M_NOWAIT, MT_DATA) : m_get(M_NOWAIT, MT_DATA);
+		if (m == NULL)
+			return (NULL);
+		fl->mbuf_allocated++;
+#ifdef T4_PKT_TIMESTAMP
+		/* Leave room for a timestamp */
+		m->m_data += 8;
+#endif
+		/* copy data to mbuf */
+		bcopy(payload, mtod(m, caddr_t), len);
+
+	} else if (sd->nmbuf * MSIZE < cll->region1) {
+
+		/*
+		 * There's spare room in the cluster for an mbuf.  Create one
+		 * and associate it with the payload that's in the cluster too.
+		 */
+
+		MPASS(clm != NULL);
+		m = (struct mbuf *)(sd->cl + sd->nmbuf * MSIZE);
+		/* No bzero required */
+		if (m_init(m, NULL, 0, M_NOWAIT, MT_DATA, flags | M_NOFREE))
+			return (NULL);
+		fl->mbuf_inlined++;
+		m_extaddref(m, payload, padded_len, &clm->refcount, rxb_free,
+		    swz->zone, sd->cl);
+		sd->nmbuf++;
+
+	} else {
+
+		/*
+		 * Grab an mbuf from zone_mbuf and associate it with the
+		 * payload in the cluster.
+		 */
+
+		m = flags & M_PKTHDR ?
+		    m_gethdr(M_NOWAIT, MT_DATA) : m_get(M_NOWAIT, MT_DATA);
+		if (m == NULL)
+			return (NULL);
+		fl->mbuf_allocated++;
+		if (clm != NULL)
+			m_extaddref(m, payload, padded_len, &clm->refcount,
+			    rxb_free, swz->zone, sd->cl);
+		else {
+			m_cljset(m, sd->cl, swz->type);
+			sd->cl = NULL;	/* consumed, not a recycle candidate */
+		}
+	}
+	if (flags & M_PKTHDR)
+		m->m_pkthdr.len = total;
+	m->m_len = len;
+
+	if (fl->flags & FL_BUF_PACKING) {
+		fl->rx_offset += roundup2(padded_len, sc->sge.pack_boundary);
+		MPASS(fl->rx_offset <= hwb->size);
+		if (fl->rx_offset < hwb->size)
+			return (m);	/* without advancing the cidx */
+	}
+
+	if (__predict_false(++fl->cidx == fl->cap))
+		fl->cidx = 0;
+	fl->rx_offset = 0;
+
+	return (m);
+}
+
 static struct mbuf *
 get_fl_payload(struct adapter *sc, struct sge_fl *fl, uint32_t len_newbuf,
     int *fl_bufs_used)
 {
-	struct mbuf *m0, *m;
-	struct fl_sdesc *sd = &fl->sdesc[fl->cidx];
-	unsigned int nbuf, len;
+	struct mbuf *m0, *m, **pnext;
+	u_int nbuf, len;
 
 	/*
 	 * No assertion for the fl lock because we don't need it.  This routine
@@ -1150,74 +1533,54 @@ get_fl_payload(struct adapter *sc, struct sge_fl *fl, uint32_t len_newbuf,
 	 * lock but this routine does not).
 	 */
 
-	if (__predict_false((len_newbuf & F_RSPD_NEWBUF) == 0))
-		panic("%s: cannot handle packed frames", __func__);
+	nbuf = 0;
 	len = G_RSPD_LEN(len_newbuf);
+	if (__predict_false(fl->m0 != NULL)) {
+		MPASS(len == fl->m0->m_pkthdr.len);
+		MPASS(fl->remaining < len);
 
-	m0 = sd->m;
-	sd->m = NULL;	/* consumed */
-
-	bus_dmamap_sync(fl->tag[sd->tag_idx], sd->map, BUS_DMASYNC_POSTREAD);
-	m_init(m0, NULL, 0, M_NOWAIT, MT_DATA, M_PKTHDR);
-#ifdef T4_PKT_TIMESTAMP
-	/* Leave room for a timestamp */
-	m0->m_data += 8;
-#endif
-
-	if (len < RX_COPY_THRESHOLD) {
-		/* copy data to mbuf, buffer will be recycled */
-		bcopy(sd->cl, mtod(m0, caddr_t), len);
-		m0->m_len = len;
-	} else {
-		bus_dmamap_unload(fl->tag[sd->tag_idx], sd->map);
-		m_cljset(m0, sd->cl, FL_BUF_TYPE(sd->tag_idx));
-		sd->cl = NULL;	/* consumed */
-		m0->m_len = min(len, FL_BUF_SIZE(sd->tag_idx));
-	}
-	m0->m_pkthdr.len = len;
-
-	sd++;
-	if (__predict_false(++fl->cidx == fl->cap)) {
-		sd = fl->sdesc;
-		fl->cidx = 0;
+		m0 = fl->m0;
+		pnext = fl->pnext;
+		len = fl->remaining;
+		fl->m0 = NULL;
+		goto get_segment;
 	}
 
-	m = m0;
-	len -= m->m_len;
-	nbuf = 1;	/* # of fl buffers used */
-
-	while (len > 0) {
-		m->m_next = sd->m;
-		sd->m = NULL;	/* consumed */
-		m = m->m_next;
-
-		bus_dmamap_sync(fl->tag[sd->tag_idx], sd->map,
-		    BUS_DMASYNC_POSTREAD);
-
-		m_init(m, NULL, 0, M_NOWAIT, MT_DATA, 0);
-		if (len <= MLEN) {
-			bcopy(sd->cl, mtod(m, caddr_t), len);
-			m->m_len = len;
-		} else {
-			bus_dmamap_unload(fl->tag[sd->tag_idx],
-			    sd->map);
-			m_cljset(m, sd->cl, FL_BUF_TYPE(sd->tag_idx));
-			sd->cl = NULL;	/* consumed */
-			m->m_len = min(len, FL_BUF_SIZE(sd->tag_idx));
-		}
-
-		sd++;
-		if (__predict_false(++fl->cidx == fl->cap)) {
-			sd = fl->sdesc;
-			fl->cidx = 0;
-		}
-
-		len -= m->m_len;
+	if (fl->rx_offset > 0 && len_newbuf & F_RSPD_NEWBUF) {
 		nbuf++;
+		fl->rx_offset = 0;
+		if (__predict_false(++fl->cidx == fl->cap))
+			fl->cidx = 0;
 	}
+
+	/*
+	 * Payload starts at rx_offset in the current hw buffer.  Its length is
+	 * 'len' and it may span multiple hw buffers.
+	 */
+
+	m0 = get_scatter_segment(sc, fl, len, M_PKTHDR);
+	len -= m0->m_len;
+	pnext = &m0->m_next;
+	while (len > 0) {
+		nbuf++;
+get_segment:
+		MPASS(fl->rx_offset == 0);
+		m = get_scatter_segment(sc, fl, len, 0);
+		if (m == NULL) {
+			fl->m0 = m0;
+			fl->pnext = pnext;
+			fl->remaining = len;
+			return (NULL);
+		}
+		*pnext = m;
+		pnext = &m->m_next;
+		len -= m->m_len;
+	}
+	*pnext = NULL;
+	if (fl->rx_offset == 0)
+		nbuf++;
 
 	(*fl_bufs_used) += nbuf;
-
 	return (m0);
 }
 
@@ -1240,7 +1603,7 @@ t4_eth_rx(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m0)
 
 	m0->m_pkthdr.rcvif = ifp;
 	m0->m_flags |= M_FLOWID;
-	m0->m_pkthdr.flowid = rss->hash_val;
+	m0->m_pkthdr.flowid = be32toh(rss->hash_val);
 
 	if (cpl->csum_calc && !cpl->err_vec) {
 		if (ifp->if_capenable & IFCAP_RXCSUM &&
@@ -1568,28 +1931,29 @@ void
 t4_update_fl_bufsize(struct ifnet *ifp)
 {
 	struct port_info *pi = ifp->if_softc;
+	struct adapter *sc = pi->adapter;
 	struct sge_rxq *rxq;
 #ifdef TCP_OFFLOAD
 	struct sge_ofld_rxq *ofld_rxq;
 #endif
 	struct sge_fl *fl;
-	int i, bufsize;
+	int i, maxp, mtu = ifp->if_mtu;
 
-	bufsize = mtu_to_bufsize(ifp->if_mtu);
+	maxp = mtu_to_max_payload(sc, mtu, 0);
 	for_each_rxq(pi, i, rxq) {
 		fl = &rxq->fl;
 
 		FL_LOCK(fl);
-		set_fl_tag_idx(fl, bufsize);
+		find_best_refill_source(sc, fl, maxp);
 		FL_UNLOCK(fl);
 	}
 #ifdef TCP_OFFLOAD
-	bufsize = mtu_to_bufsize_toe(pi->adapter, ifp->if_mtu);
+	maxp = mtu_to_max_payload(sc, mtu, 1);
 	for_each_ofld_rxq(pi, i, ofld_rxq) {
 		fl = &ofld_rxq->fl;
 
 		FL_LOCK(fl);
-		set_fl_tag_idx(fl, bufsize);
+		find_best_refill_source(sc, fl, maxp);
 		FL_UNLOCK(fl);
 	}
 #endif
@@ -1623,11 +1987,16 @@ init_iq(struct sge_iq *iq, struct adapter *sc, int tmr_idx, int pktc_idx,
 }
 
 static inline void
-init_fl(struct sge_fl *fl, int qsize, int bufsize, char *name)
+init_fl(struct adapter *sc, struct sge_fl *fl, int qsize, int maxp, int pack,
+    char *name)
 {
+
 	fl->qsize = qsize;
 	strlcpy(fl->lockname, name, sizeof(fl->lockname));
-	set_fl_tag_idx(fl, bufsize);
+	if (pack)
+		fl->flags |= FL_BUF_PACKING;
+	find_best_refill_source(sc, fl, maxp);
+	find_safe_refill_source(sc, fl);
 }
 
 static inline void
@@ -1756,24 +2125,6 @@ alloc_iq_fl(struct port_info *pi, struct sge_iq *iq, struct sge_fl *fl,
 	if (fl) {
 		mtx_init(&fl->fl_lock, fl->lockname, NULL, MTX_DEF);
 
-		for (i = 0; i < FL_BUF_SIZES; i++) {
-
-			/*
-			 * A freelist buffer must be 16 byte aligned as the SGE
-			 * uses the low 4 bits of the bus addr to figure out the
-			 * buffer size.
-			 */
-			rc = bus_dma_tag_create(sc->dmat, 16, 0,
-			    BUS_SPACE_MAXADDR, BUS_SPACE_MAXADDR, NULL, NULL,
-			    FL_BUF_SIZE(i), 1, FL_BUF_SIZE(i), BUS_DMA_ALLOCNOW,
-			    NULL, NULL, &fl->tag[i]);
-			if (rc != 0) {
-				device_printf(sc->dev,
-				    "failed to create fl DMA tag[%d]: %d\n",
-				    i, rc);
-				return (rc);
-			}
-		}
 		len = fl->qsize * RX_FL_ESIZE;
 		rc = alloc_ring(sc, len, &fl->desc_tag, &fl->desc_map,
 		    &fl->ba, (void **)&fl->desc);
@@ -1782,9 +2133,7 @@ alloc_iq_fl(struct port_info *pi, struct sge_iq *iq, struct sge_fl *fl,
 
 		/* Allocate space for one software descriptor per buffer. */
 		fl->cap = (fl->qsize - spg_len / RX_FL_ESIZE) * 8;
-		FL_LOCK(fl);
 		rc = alloc_fl_sdesc(fl);
-		FL_UNLOCK(fl);
 		if (rc != 0) {
 			device_printf(sc->dev,
 			    "failed to setup fl software descriptors: %d\n",
@@ -1792,12 +2141,16 @@ alloc_iq_fl(struct port_info *pi, struct sge_iq *iq, struct sge_fl *fl,
 			return (rc);
 		}
 		fl->needed = fl->cap;
-		fl->lowat = roundup2(sc->sge.fl_starve_threshold, 8);
+		fl->lowat = fl->flags & FL_BUF_PACKING ?
+		    roundup2(sc->sge.fl_starve_threshold2, 8) :
+		    roundup2(sc->sge.fl_starve_threshold, 8);
 
 		c.iqns_to_fl0congen |=
 		    htobe32(V_FW_IQ_CMD_FL0HOSTFCMODE(X_HOSTFCMODE_NONE) |
 			F_FW_IQ_CMD_FL0FETCHRO | F_FW_IQ_CMD_FL0DATARO |
-			F_FW_IQ_CMD_FL0PADEN);
+			(fl_pad ? F_FW_IQ_CMD_FL0PADEN : 0) |
+			(fl->flags & FL_BUF_PACKING ? F_FW_IQ_CMD_FL0PACKEN :
+			    0));
 		if (cong >= 0) {
 			c.iqns_to_fl0congen |=
 				htobe32(V_FW_IQ_CMD_FL0CNGCHMAP(cong) |
@@ -1852,6 +2205,31 @@ alloc_iq_fl(struct port_info *pi, struct sge_iq *iq, struct sge_fl *fl,
 		iq->flags |= IQ_HAS_FL;
 	}
 
+	if (is_t5(sc) && cong >= 0) {
+		uint32_t param, val;
+
+		param = V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_DMAQ) |
+		    V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_DMAQ_CONM_CTXT) |
+		    V_FW_PARAMS_PARAM_YZ(iq->cntxt_id);
+		if (cong == 0)
+			val = 1 << 19;
+		else {
+			val = 2 << 19;
+			for (i = 0; i < 4; i++) {
+				if (cong & (1 << i))
+					val |= 1 << (i << 2);
+			}
+		}
+
+		rc = -t4_set_params(sc, sc->mbox, sc->pf, 0, 1, &param, &val);
+		if (rc != 0) {
+			/* report error but carry on */
+			device_printf(sc->dev,
+			    "failed to set congestion manager context for "
+			    "ingress queue %d: %d\n", iq->cntxt_id, rc);
+		}
+	}
+
 	/* Enable IQ interrupts */
 	atomic_store_rel_int(&iq->state, IQS_IDLE);
 	t4_write_reg(sc, MYPF_REG(A_SGE_PF_GTS), V_SEINTARM(iq->intr_params) |
@@ -1863,7 +2241,7 @@ alloc_iq_fl(struct port_info *pi, struct sge_iq *iq, struct sge_fl *fl,
 static int
 free_iq_fl(struct port_info *pi, struct sge_iq *iq, struct sge_fl *fl)
 {
-	int i, rc;
+	int rc;
 	struct adapter *sc = iq->adapter;
 	device_t dev;
 
@@ -1892,24 +2270,49 @@ free_iq_fl(struct port_info *pi, struct sge_iq *iq, struct sge_fl *fl)
 		free_ring(sc, fl->desc_tag, fl->desc_map, fl->ba,
 		    fl->desc);
 
-		if (fl->sdesc) {
-			FL_LOCK(fl);
-			free_fl_sdesc(fl);
-			FL_UNLOCK(fl);
-		}
+		if (fl->sdesc)
+			free_fl_sdesc(sc, fl);
 
 		if (mtx_initialized(&fl->fl_lock))
 			mtx_destroy(&fl->fl_lock);
-
-		for (i = 0; i < FL_BUF_SIZES; i++) {
-			if (fl->tag[i])
-				bus_dma_tag_destroy(fl->tag[i]);
-		}
 
 		bzero(fl, sizeof(*fl));
 	}
 
 	return (0);
+}
+
+static void
+add_fl_sysctls(struct sysctl_ctx_list *ctx, struct sysctl_oid *oid,
+    struct sge_fl *fl)
+{
+	struct sysctl_oid_list *children = SYSCTL_CHILDREN(oid);
+
+	oid = SYSCTL_ADD_NODE(ctx, children, OID_AUTO, "fl", CTLFLAG_RD, NULL,
+	    "freelist");
+	children = SYSCTL_CHILDREN(oid);
+
+	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "cntxt_id",
+	    CTLTYPE_INT | CTLFLAG_RD, &fl->cntxt_id, 0, sysctl_uint16, "I",
+	    "SGE context id of the freelist");
+	SYSCTL_ADD_UINT(ctx, children, OID_AUTO, "cidx", CTLFLAG_RD, &fl->cidx,
+	    0, "consumer index");
+	if (fl->flags & FL_BUF_PACKING) {
+		SYSCTL_ADD_UINT(ctx, children, OID_AUTO, "rx_offset",
+		    CTLFLAG_RD, &fl->rx_offset, 0, "packing rx offset");
+	}
+	SYSCTL_ADD_UINT(ctx, children, OID_AUTO, "pidx", CTLFLAG_RD, &fl->pidx,
+	    0, "producer index");
+	SYSCTL_ADD_UQUAD(ctx, children, OID_AUTO, "mbuf_allocated",
+	    CTLFLAG_RD, &fl->mbuf_allocated, "# of mbuf allocated");
+	SYSCTL_ADD_UQUAD(ctx, children, OID_AUTO, "mbuf_inlined",
+	    CTLFLAG_RD, &fl->mbuf_inlined, "# of mbuf inlined in clusters");
+	SYSCTL_ADD_UQUAD(ctx, children, OID_AUTO, "cluster_allocated",
+	    CTLFLAG_RD, &fl->cl_allocated, "# of clusters allocated");
+	SYSCTL_ADD_UQUAD(ctx, children, OID_AUTO, "cluster_recycled",
+	    CTLFLAG_RD, &fl->cl_recycled, "# of clusters recycled");
+	SYSCTL_ADD_UQUAD(ctx, children, OID_AUTO, "cluster_fast_recycled",
+	    CTLFLAG_RD, &fl->cl_fast_recycled, "# of clusters recycled (fast)");
 }
 
 static int
@@ -1994,7 +2397,7 @@ tnl_cong(struct port_info *pi)
 	else if (cong_drop == 1)
 		return (0);
 	else
-		return (1 << pi->tx_chan);
+		return (pi->rx_chan_map);
 }
 
 static int
@@ -2052,18 +2455,7 @@ alloc_rxq(struct port_info *pi, struct sge_rxq *rxq, int intr_idx, int idx,
 	    CTLFLAG_RD, &rxq->vlan_extraction,
 	    "# of times hardware extracted 802.1Q tag");
 
-	children = SYSCTL_CHILDREN(oid);
-	oid = SYSCTL_ADD_NODE(&pi->ctx, children, OID_AUTO, "fl", CTLFLAG_RD,
-	    NULL, "freelist");
-	children = SYSCTL_CHILDREN(oid);
-
-	SYSCTL_ADD_PROC(&pi->ctx, children, OID_AUTO, "cntxt_id",
-	    CTLTYPE_INT | CTLFLAG_RD, &rxq->fl.cntxt_id, 0, sysctl_uint16, "I",
-	    "SGE context id of the queue");
-	SYSCTL_ADD_UINT(&pi->ctx, children, OID_AUTO, "cidx", CTLFLAG_RD,
-	    &rxq->fl.cidx, 0, "consumer index");
-	SYSCTL_ADD_UINT(&pi->ctx, children, OID_AUTO, "pidx", CTLFLAG_RD,
-	    &rxq->fl.pidx, 0, "producer index");
+	add_fl_sysctls(&pi->ctx, oid, &rxq->fl);
 
 	return (rc);
 }
@@ -2097,7 +2489,7 @@ alloc_ofld_rxq(struct port_info *pi, struct sge_ofld_rxq *ofld_rxq,
 	char name[16];
 
 	rc = alloc_iq_fl(pi, &ofld_rxq->iq, &ofld_rxq->fl, intr_idx,
-	    1 << pi->tx_chan);
+	    pi->rx_chan_map);
 	if (rc != 0)
 		return (rc);
 
@@ -2118,18 +2510,7 @@ alloc_ofld_rxq(struct port_info *pi, struct sge_ofld_rxq *ofld_rxq,
 	    CTLTYPE_INT | CTLFLAG_RD, &ofld_rxq->iq.cidx, 0, sysctl_uint16, "I",
 	    "consumer index");
 
-	children = SYSCTL_CHILDREN(oid);
-	oid = SYSCTL_ADD_NODE(&pi->ctx, children, OID_AUTO, "fl", CTLFLAG_RD,
-	    NULL, "freelist");
-	children = SYSCTL_CHILDREN(oid);
-
-	SYSCTL_ADD_PROC(&pi->ctx, children, OID_AUTO, "cntxt_id",
-	    CTLTYPE_INT | CTLFLAG_RD, &ofld_rxq->fl.cntxt_id, 0, sysctl_uint16,
-	    "I", "SGE context id of the queue");
-	SYSCTL_ADD_UINT(&pi->ctx, children, OID_AUTO, "cidx", CTLFLAG_RD,
-	    &ofld_rxq->fl.cidx, 0, "consumer index");
-	SYSCTL_ADD_UINT(&pi->ctx, children, OID_AUTO, "pidx", CTLFLAG_RD,
-	    &ofld_rxq->fl.pidx, 0, "producer index");
+	add_fl_sysctls(&pi->ctx, oid, &ofld_rxq->fl);
 
 	return (rc);
 }
@@ -2327,7 +2708,7 @@ alloc_eq(struct adapter *sc, struct port_info *pi, struct sge_eq *eq)
 	if (isset(&eq->doorbells, DOORBELL_UDB) ||
 	    isset(&eq->doorbells, DOORBELL_UDBWC) ||
 	    isset(&eq->doorbells, DOORBELL_WCWR)) {
-		uint32_t s_qpp = sc->sge.s_qpp;
+		uint32_t s_qpp = sc->sge.eq_s_qpp;
 		uint32_t mask = (1 << s_qpp) - 1;
 		volatile uint8_t *udb;
 
@@ -2422,7 +2803,6 @@ alloc_wrq(struct adapter *sc, struct port_info *pi, struct sge_wrq *wrq,
 	    "# of times queue ran out of hardware descriptors");
 	SYSCTL_ADD_UINT(ctx, children, OID_AUTO, "unstalled", CTLFLAG_RD,
 	    &wrq->eq.unstalled, 0, "# of times queue recovered after stall");
-
 
 	return (rc);
 }
@@ -2617,88 +2997,83 @@ refill_fl(struct adapter *sc, struct sge_fl *fl, int nbufs)
 {
 	__be64 *d = &fl->desc[fl->pidx];
 	struct fl_sdesc *sd = &fl->sdesc[fl->pidx];
-	bus_dma_tag_t tag;
-	bus_addr_t pa;
+	uintptr_t pa;
 	caddr_t cl;
-	int rc;
+	struct cluster_layout *cll = &fl->cll_def;	/* default layout */
+	struct sw_zone_info *swz = &sc->sge.sw_zone_info[cll->zidx];
+	struct cluster_metadata *clm;
 
 	FL_LOCK_ASSERT_OWNED(fl);
 
 	if (nbufs > fl->needed)
 		nbufs = fl->needed;
+	nbufs -= (fl->pidx + nbufs) % 8;
 
 	while (nbufs--) {
 
 		if (sd->cl != NULL) {
 
-			/*
-			 * This happens when a frame small enough to fit
-			 * entirely in an mbuf was received in cl last time.
-			 * We'd held on to cl and can reuse it now.  Note that
-			 * we reuse a cluster of the old size if fl->tag_idx is
-			 * no longer the same as sd->tag_idx.
-			 */
-
-			KASSERT(*d == sd->ba_tag,
-			    ("%s: recyling problem at pidx %d",
-			    __func__, fl->pidx));
-
-			d++;
-			goto recycled;
-		}
-
-
-		if (fl->tag_idx != sd->tag_idx) {
-			bus_dmamap_t map;
-			bus_dma_tag_t newtag = fl->tag[fl->tag_idx];
-			bus_dma_tag_t oldtag = fl->tag[sd->tag_idx];
-
-			/*
-			 * An MTU change can get us here.  Discard the old map
-			 * which was created with the old tag, but only if
-			 * we're able to get a new one.
-			 */
-			rc = bus_dmamap_create(newtag, 0, &map);
-			if (rc == 0) {
-				bus_dmamap_destroy(oldtag, sd->map);
-				sd->map = map;
-				sd->tag_idx = fl->tag_idx;
+			if (sd->nmbuf == 0) {
+				/*
+				 * Fast recycle without involving any atomics on
+				 * the cluster's metadata (if the cluster has
+				 * metadata).  This happens when all frames
+				 * received in the cluster were small enough to
+				 * fit within a single mbuf each.
+				 */
+				fl->cl_fast_recycled++;
+				goto recycled_fast;
 			}
+
+			/*
+			 * Cluster is guaranteed to have metadata.  Clusters
+			 * without metadata always take the fast recycle path
+			 * when they're recycled.
+			 */
+			clm = cl_metadata(sc, fl, &sd->cll, sd->cl);
+			MPASS(clm != NULL);
+
+			if (atomic_fetchadd_int(&clm->refcount, -1) == 1) {
+				fl->cl_recycled++;
+				goto recycled;
+			}
+			sd->cl = NULL;	/* gave up my reference */
 		}
+		MPASS(sd->cl == NULL);
+alloc:
+		cl = uma_zalloc(swz->zone, M_NOWAIT);
+		if (__predict_false(cl == NULL)) {
+			if (cll == &fl->cll_alt || fl->cll_alt.zidx == -1 ||
+			    fl->cll_def.zidx == fl->cll_alt.zidx)
+				break;
 
-		tag = fl->tag[sd->tag_idx];
-
-		cl = m_cljget(NULL, M_NOWAIT, FL_BUF_SIZE(sd->tag_idx));
-		if (cl == NULL)
-			break;
-
-		rc = bus_dmamap_load(tag, sd->map, cl, FL_BUF_SIZE(sd->tag_idx),
-		    oneseg_dma_callback, &pa, 0);
-		if (rc != 0 || pa == 0) {
-			fl->dmamap_failed++;
-			uma_zfree(FL_BUF_ZONE(sd->tag_idx), cl);
-			break;
+			/* fall back to the safe zone */
+			cll = &fl->cll_alt;
+			swz = &sc->sge.sw_zone_info[cll->zidx];
+			goto alloc;
 		}
+		fl->cl_allocated++;
 
+		pa = pmap_kextract((vm_offset_t)cl);
+		pa += cll->region1;
 		sd->cl = cl;
-		*d++ = htobe64(pa | sd->tag_idx);
-
-#ifdef INVARIANTS
-		sd->ba_tag = htobe64(pa | sd->tag_idx);
-#endif
-
+		sd->cll = *cll;
+		*d = htobe64(pa | cll->hwidx);
+		clm = cl_metadata(sc, fl, cll, cl);
+		if (clm != NULL) {
 recycled:
-		/* sd->m is never recycled, should always be NULL */
-		KASSERT(sd->m == NULL, ("%s: stray mbuf", __func__));
-
-		sd->m = m_gethdr(M_NOWAIT, MT_NOINIT);
-		if (sd->m == NULL)
-			break;
-
+#ifdef INVARIANTS
+			clm->sd = sd;
+#endif
+			clm->refcount = 1;
+		}
+		sd->nmbuf = 0;
+recycled_fast:
 		fl->pending++;
 		fl->needed--;
+		d++;
 		sd++;
-		if (++fl->pidx == fl->cap) {
+		if (__predict_false(++fl->pidx == fl->cap)) {
 			fl->pidx = 0;
 			sd = fl->sdesc;
 			d = fl->desc;
@@ -2739,68 +3114,33 @@ refill_sfl(void *arg)
 static int
 alloc_fl_sdesc(struct sge_fl *fl)
 {
-	struct fl_sdesc *sd;
-	bus_dma_tag_t tag;
-	int i, rc;
-
-	FL_LOCK_ASSERT_OWNED(fl);
 
 	fl->sdesc = malloc(fl->cap * sizeof(struct fl_sdesc), M_CXGBE,
 	    M_ZERO | M_WAITOK);
 
-	tag = fl->tag[fl->tag_idx];
-	sd = fl->sdesc;
-	for (i = 0; i < fl->cap; i++, sd++) {
-
-		sd->tag_idx = fl->tag_idx;
-		rc = bus_dmamap_create(tag, 0, &sd->map);
-		if (rc != 0)
-			goto failed;
-	}
-
 	return (0);
-failed:
-	while (--i >= 0) {
-		sd--;
-		bus_dmamap_destroy(tag, sd->map);
-		if (sd->m) {
-			m_init(sd->m, NULL, 0, M_NOWAIT, MT_DATA, 0);
-			m_free(sd->m);
-			sd->m = NULL;
-		}
-	}
-	KASSERT(sd == fl->sdesc, ("%s: EDOOFUS", __func__));
-
-	free(fl->sdesc, M_CXGBE);
-	fl->sdesc = NULL;
-
-	return (rc);
 }
 
 static void
-free_fl_sdesc(struct sge_fl *fl)
+free_fl_sdesc(struct adapter *sc, struct sge_fl *fl)
 {
 	struct fl_sdesc *sd;
+	struct cluster_metadata *clm;
+	struct cluster_layout *cll;
 	int i;
-
-	FL_LOCK_ASSERT_OWNED(fl);
 
 	sd = fl->sdesc;
 	for (i = 0; i < fl->cap; i++, sd++) {
+		if (sd->cl == NULL)
+			continue;
 
-		if (sd->m) {
-			m_init(sd->m, NULL, 0, M_NOWAIT, MT_DATA, 0);
-			m_free(sd->m);
-			sd->m = NULL;
+		cll = &sd->cll;
+		clm = cl_metadata(sc, fl, cll, sd->cl);
+		if (sd->nmbuf == 0 ||
+		    (clm && atomic_fetchadd_int(&clm->refcount, -1) == 1)) {
+			uma_zfree(sc->sge.sw_zone_info[cll->zidx].zone, sd->cl);
 		}
-
-		if (sd->cl) {
-			bus_dmamap_unload(fl->tag[sd->tag_idx], sd->map);
-			uma_zfree(FL_BUF_ZONE(sd->tag_idx), sd->cl);
-			sd->cl = NULL;
-		}
-
-		bus_dmamap_destroy(fl->tag[sd->tag_idx], sd->map);
+		sd->cl = NULL;
 	}
 
 	free(fl->sdesc, M_CXGBE);
@@ -3624,7 +3964,7 @@ write_eqflush_wr(struct sge_eq *eq)
 	eq->pending++;
 	eq->avail--;
 	if (++eq->pidx == eq->cap)
-		eq->pidx = 0; 
+		eq->pidx = 0;
 }
 
 static __be64
@@ -3652,16 +3992,166 @@ get_flit(bus_dma_segment_t *sgl, int nsegs, int idx)
 }
 
 static void
-set_fl_tag_idx(struct sge_fl *fl, int bufsize)
+find_best_refill_source(struct adapter *sc, struct sge_fl *fl, int maxp)
 {
-	int i;
+	int8_t zidx, hwidx, idx;
+	uint16_t region1, region3;
+	int spare, spare_needed, n;
+	struct sw_zone_info *swz;
+	struct hw_buf_info *hwb, *hwb_list = &sc->sge.hw_buf_info[0];
 
-	for (i = 0; i < FL_BUF_SIZES - 1; i++) {
-		if (FL_BUF_SIZE(i) >= bufsize)
+	/*
+	 * Buffer Packing: Look for PAGE_SIZE or larger zone which has a bufsize
+	 * large enough for the max payload and cluster metadata.  Otherwise
+	 * settle for the largest bufsize that leaves enough room in the cluster
+	 * for metadata.
+	 *
+	 * Without buffer packing: Look for the smallest zone which has a
+	 * bufsize large enough for the max payload.  Settle for the largest
+	 * bufsize available if there's nothing big enough for max payload.
+	 */
+	spare_needed = fl->flags & FL_BUF_PACKING ? CL_METADATA_SIZE : 0;
+	swz = &sc->sge.sw_zone_info[0];
+	hwidx = -1;
+	for (zidx = 0; zidx < SW_ZONE_SIZES; zidx++, swz++) {
+		if (swz->size > largest_rx_cluster) {
+			if (__predict_true(hwidx != -1))
+				break;
+
+			/*
+			 * This is a misconfiguration.  largest_rx_cluster is
+			 * preventing us from finding a refill source.  See
+			 * dev.t5nex.<n>.buffer_sizes to figure out why.
+			 */
+			device_printf(sc->dev, "largest_rx_cluster=%u leaves no"
+			    " refill source for fl %p (dma %u).  Ignored.\n",
+			    largest_rx_cluster, fl, maxp);
+		}
+		for (idx = swz->head_hwidx; idx != -1; idx = hwb->next) {
+			hwb = &hwb_list[idx];
+			spare = swz->size - hwb->size;
+			if (spare < spare_needed)
+				continue;
+
+			hwidx = idx;		/* best option so far */
+			if (hwb->size >= maxp) {
+
+				if ((fl->flags & FL_BUF_PACKING) == 0)
+					goto done; /* stop looking (not packing) */
+
+				if (swz->size >= safest_rx_cluster)
+					goto done; /* stop looking (packing) */
+			}
+			break;		/* keep looking, next zone */
+		}
+	}
+done:
+	/* A usable hwidx has been located. */
+	MPASS(hwidx != -1);
+	hwb = &hwb_list[hwidx];
+	zidx = hwb->zidx;
+	swz = &sc->sge.sw_zone_info[zidx];
+	region1 = 0;
+	region3 = swz->size - hwb->size;
+
+	/*
+	 * Stay within this zone and see if there is a better match when mbuf
+	 * inlining is allowed.  Remember that the hwidx's are sorted in
+	 * decreasing order of size (so in increasing order of spare area).
+	 */
+	for (idx = hwidx; idx != -1; idx = hwb->next) {
+		hwb = &hwb_list[idx];
+		spare = swz->size - hwb->size;
+
+		if (allow_mbufs_in_cluster == 0 || hwb->size < maxp)
 			break;
+		if (spare < CL_METADATA_SIZE + MSIZE)
+			continue;
+		n = (spare - CL_METADATA_SIZE) / MSIZE;
+		if (n > howmany(hwb->size, maxp))
+			break;
+
+		hwidx = idx;
+		if (fl->flags & FL_BUF_PACKING) {
+			region1 = n * MSIZE;
+			region3 = spare - region1;
+		} else {
+			region1 = MSIZE;
+			region3 = spare - region1;
+			break;
+		}
 	}
 
-	fl->tag_idx = i;
+	KASSERT(zidx >= 0 && zidx < SW_ZONE_SIZES,
+	    ("%s: bad zone %d for fl %p, maxp %d", __func__, zidx, fl, maxp));
+	KASSERT(hwidx >= 0 && hwidx <= SGE_FLBUF_SIZES,
+	    ("%s: bad hwidx %d for fl %p, maxp %d", __func__, hwidx, fl, maxp));
+	KASSERT(region1 + sc->sge.hw_buf_info[hwidx].size + region3 ==
+	    sc->sge.sw_zone_info[zidx].size,
+	    ("%s: bad buffer layout for fl %p, maxp %d. "
+		"cl %d; r1 %d, payload %d, r3 %d", __func__, fl, maxp,
+		sc->sge.sw_zone_info[zidx].size, region1,
+		sc->sge.hw_buf_info[hwidx].size, region3));
+	if (fl->flags & FL_BUF_PACKING || region1 > 0) {
+		KASSERT(region3 >= CL_METADATA_SIZE,
+		    ("%s: no room for metadata.  fl %p, maxp %d; "
+		    "cl %d; r1 %d, payload %d, r3 %d", __func__, fl, maxp,
+		    sc->sge.sw_zone_info[zidx].size, region1,
+		    sc->sge.hw_buf_info[hwidx].size, region3));
+		KASSERT(region1 % MSIZE == 0,
+		    ("%s: bad mbuf region for fl %p, maxp %d. "
+		    "cl %d; r1 %d, payload %d, r3 %d", __func__, fl, maxp,
+		    sc->sge.sw_zone_info[zidx].size, region1,
+		    sc->sge.hw_buf_info[hwidx].size, region3));
+	}
+
+	fl->cll_def.zidx = zidx;
+	fl->cll_def.hwidx = hwidx;
+	fl->cll_def.region1 = region1;
+	fl->cll_def.region3 = region3;
+}
+
+static void
+find_safe_refill_source(struct adapter *sc, struct sge_fl *fl)
+{
+	struct sge *s = &sc->sge;
+	struct hw_buf_info *hwb;
+	struct sw_zone_info *swz;
+	int spare;
+	int8_t hwidx;
+
+	if (fl->flags & FL_BUF_PACKING)
+		hwidx = s->safe_hwidx2;	/* with room for metadata */
+	else if (allow_mbufs_in_cluster && s->safe_hwidx2 != -1) {
+		hwidx = s->safe_hwidx2;
+		hwb = &s->hw_buf_info[hwidx];
+		swz = &s->sw_zone_info[hwb->zidx];
+		spare = swz->size - hwb->size;
+
+		/* no good if there isn't room for an mbuf as well */
+		if (spare < CL_METADATA_SIZE + MSIZE)
+			hwidx = s->safe_hwidx1;
+	} else
+		hwidx = s->safe_hwidx1;
+
+	if (hwidx == -1) {
+		/* No fallback source */
+		fl->cll_alt.hwidx = -1;
+		fl->cll_alt.zidx = -1;
+
+		return;
+	}
+
+	hwb = &s->hw_buf_info[hwidx];
+	swz = &s->sw_zone_info[hwb->zidx];
+	spare = swz->size - hwb->size;
+	fl->cll_alt.hwidx = hwidx;
+	fl->cll_alt.zidx = hwb->zidx;
+	if (allow_mbufs_in_cluster)
+		fl->cll_alt.region1 = ((spare - CL_METADATA_SIZE) / MSIZE) * MSIZE;
+	else
+		fl->cll_alt.region1 = 0;
+	fl->cll_alt.region3 = spare - fl->cll_alt.region1;
 }
 
 static void
@@ -3737,4 +4227,30 @@ sysctl_uint16(SYSCTL_HANDLER_ARGS)
 	int i = *id;
 
 	return sysctl_handle_int(oidp, &i, 0, req);
+}
+
+static int
+sysctl_bufsizes(SYSCTL_HANDLER_ARGS)
+{
+	struct sge *s = arg1;
+	struct hw_buf_info *hwb = &s->hw_buf_info[0];
+	struct sw_zone_info *swz = &s->sw_zone_info[0];
+	int i, rc;
+	struct sbuf sb;
+	char c;
+
+	sbuf_new(&sb, NULL, 32, SBUF_AUTOEXTEND);
+	for (i = 0; i < SGE_FLBUF_SIZES; i++, hwb++) {
+		if (hwb->zidx >= 0 && swz[hwb->zidx].size <= largest_rx_cluster)
+			c = '*';
+		else
+			c = '\0';
+
+		sbuf_printf(&sb, "%u%c ", hwb->size, c);
+	}
+	sbuf_trim(&sb);
+	sbuf_finish(&sb);
+	rc = sysctl_handle_string(oidp, sbuf_data(&sb), sbuf_len(&sb), req);
+	sbuf_delete(&sb);
+	return (rc);
 }

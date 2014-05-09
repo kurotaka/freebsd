@@ -1654,6 +1654,7 @@ product DRAYTEK VIGOR550	0x0550	Vigor550
 /* dresden elektronik products */
 product DRESDENELEKTRONIK SENSORTERMINALBOARD  0x0001 SensorTerminalBoard
 product DRESDENELEKTRONIK WIRELESSHANDHELDTERMINAL  0x0004 Wireless Handheld Terminal
+product DRESDENELEKTRONIK LEVELSHIFTERSTICKLOWCOST  0x0022 Levelshifter Stick Low Cost
 
 /* Dynastream Innovations */
 product DYNASTREAM ANTDEVBOARD	0x1003	ANT dev board
@@ -2504,6 +2505,7 @@ product KEYSPAN UIA11		0x0202	UIA-11 remote control
 /* Kingston products */
 product KINGSTON XX1		0x0008	Ethernet
 product KINGSTON KNU101TX	0x000a	KNU101TX USB Ethernet
+product KINGSTON HYPERX3_0	0x162b	DT HyperX 3.0
 
 /* Kawasaki products */
 product KLSI DUH3E10BT		0x0008	USB Ethernet

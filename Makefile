@@ -31,6 +31,10 @@
 # targets             - Print a list of supported TARGET/TARGET_ARCH pairs
 #                       for world and kernel targets.
 # toolchains          - Build a toolchain for all world and kernel targets.
+# xdev                - xdev-build + xdev-install for the architecture
+#                       specified with XDEV and XDEV_ARCH.
+# xdev-build          - Build cross-development tools.
+# xdev-install        - Install cross-development tools.
 #
 # This makefile is simple by design. The FreeBSD make automatically reads
 # the /usr/share/mk/sys.mk unless the -m argument is specified on the
@@ -218,8 +222,17 @@ cleanworld:
 ${TGTS}:
 	${_+_}@cd ${.CURDIR}; ${_MAKE} ${.TARGET}
 
-# Set a reasonable default
-.MAIN:	all
+# The historic default "all" target creates files which may cause stale
+# or (in the cross build case) unlinkable results. Fail with an error
+# when no target is given. The users can explicitly specify "all"
+# if they want the historic behavior.
+.MAIN:	_guard
+
+_guard:
+	@echo
+	@echo "Explicit target required (use \"all\" for historic behavior)"
+	@echo
+	@false
 
 STARTTIME!= LC_ALL=C date
 CHECK_TIME!= find ${.CURDIR}/sys/sys/param.h -mtime -0s ; echo

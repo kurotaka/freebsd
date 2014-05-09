@@ -404,7 +404,6 @@ f_acl(PLAN *plan __unused, FTSENT *entry)
 	acl_free(facl);
 	if (ret) {
 		warn("%s", entry->fts_accpath);
-		acl_free(facl);
 		return (0);
 	}
 	if (trivial)
@@ -974,6 +973,25 @@ c_group(OPTION *option, char ***argvp)
 
 	new->g_data = gid;
 	return new;
+}
+
+/*
+ * -ignore_readdir_race functions --
+ *
+ *	Always true. Ignore errors which occur if a file or a directory
+ *	in a starting point gets deleted between reading the name and calling
+ *	stat on it while find is traversing the starting point.
+ */
+
+PLAN *
+c_ignore_readdir_race(OPTION *option, char ***argvp __unused)
+{
+	if (strcmp(option->name, "-ignore_readdir_race") == 0)
+		ignore_readdir_race = 1;
+	else
+		ignore_readdir_race = 0;
+
+	return palloc(option);
 }
 
 /*
@@ -1705,6 +1723,7 @@ f_false(PLAN *plan __unused, FTSENT *entry __unused)
 int
 f_quit(PLAN *plan __unused, FTSENT *entry __unused)
 {
+	finish_execplus();
 	exit(0);
 }
 

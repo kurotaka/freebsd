@@ -629,6 +629,7 @@ defun(const char *name, union node *func)
 
 /*
  * Delete a function if it exists.
+ * Called with interrupts off.
  */
 
 int
@@ -643,6 +644,19 @@ unsetfunc(const char *name)
 	}
 	return (0);
 }
+
+
+/*
+ * Check if a function by a certain name exists.
+ */
+int
+isfunc(const char *name)
+{
+	struct tblentry *cmdp;
+	cmdp = cmdlookup(name, 0);
+	return (cmdp != NULL && cmdp->cmdtype == CMDFUNCTION);
+}
+
 
 /*
  * Shared code for the following builtin commands:
