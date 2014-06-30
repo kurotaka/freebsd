@@ -246,8 +246,10 @@ MAN=	aac.4 \
 	mod_cc.4 \
 	mos.4 \
 	mouse.4 \
+	mpr.4 \
 	mps.4 \
 	mpt.4 \
+	mrsas.4 \
 	msk.4 \
 	mtio.4 \
 	multicast.4 \
@@ -527,6 +529,7 @@ MAN=	aac.4 \
 	vlan.4 \
 	vpo.4 \
 	vr.4 \
+	vt.4 \
 	vte.4 \
 	${_vtnet.4} \
 	${_vxge.4} \

@@ -44,7 +44,7 @@
 .ds doc-str-Lb-librtld_db  Run-time Linker Debugging Library (librtld_db, \-lrtld_db)
 .
 .\" Default .Os value
-.ds doc-default-operating-system FreeBSD\~9.2
+.ds doc-default-operating-system FreeBSD\~9.3
 .
 .\" FreeBSD releases not found in doc-common
 .ds doc-operating-system-FreeBSD-7.4    7.4
@@ -52,6 +52,7 @@
 .ds doc-operating-system-FreeBSD-8.4    8.4
 .ds doc-operating-system-FreeBSD-9.1    9.1
 .ds doc-operating-system-FreeBSD-9.2    9.2
+.ds doc-operating-system-FreeBSD-9.3    9.3
 .ds doc-operating-system-FreeBSD-10.0   10.0
 .
 .\" Definitions not (yet) in doc-syms

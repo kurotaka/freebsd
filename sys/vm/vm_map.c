@@ -1967,7 +1967,8 @@ vm_map_protect(vm_map_t map, vm_offset_t start, vm_offset_t end,
 		 * charged clipped mapping of the same object later.
 		 */
 		KASSERT(obj->charge == 0,
-		    ("vm_map_protect: object %p overcharged\n", obj));
+		    ("vm_map_protect: object %p overcharged (entry %p)",
+		    obj, current));
 		if (!swap_reserve(ptoa(obj->size))) {
 			VM_OBJECT_UNLOCK(obj);
 			vm_map_unlock(map);
@@ -3751,6 +3752,8 @@ vmspace_exec(struct proc *p, vm_offset_t minuser, vm_offset_t maxuser)
 	struct vmspace *oldvmspace = p->p_vmspace;
 	struct vmspace *newvmspace;
 
+	KASSERT((curthread->td_pflags & TDP_EXECVMSPC) == 0,
+	    ("vmspace_exec recursed"));
 	newvmspace = vmspace_alloc(minuser, maxuser);
 	if (newvmspace == NULL)
 		return (ENOMEM);
@@ -3767,7 +3770,7 @@ vmspace_exec(struct proc *p, vm_offset_t minuser, vm_offset_t maxuser)
 	PROC_VMSPACE_UNLOCK(p);
 	if (p == curthread->td_proc)
 		pmap_activate(curthread);
-	vmspace_free(oldvmspace);
+	curthread->td_pflags |= TDP_EXECVMSPC;
 	return (0);
 }
 

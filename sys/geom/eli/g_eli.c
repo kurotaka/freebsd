@@ -1132,6 +1132,7 @@ g_eli_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 			g_eli_keyfiles_clear(pp->name);
 			return (NULL);
 		}
+		g_eli_keyfiles_clear(pp->name);
 		G_ELI_DEBUG(1, "Using Master Key %u for %s.", nkey, pp->name);
 		break;
 	}

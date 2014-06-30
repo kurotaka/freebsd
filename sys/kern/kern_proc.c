@@ -864,6 +864,7 @@ fill_kinfo_proc_only(struct proc *p, struct kinfo_proc *kp)
 	kp->ki_swtime = (ticks - p->p_swtick) / hz;
 	kp->ki_pid = p->p_pid;
 	kp->ki_nice = p->p_nice;
+	kp->ki_fibnum = p->p_fibnum;
 	kp->ki_start = p->p_stats->p_start;
 	timevaladd(&kp->ki_start, &boottime);
 	PROC_SLOCK(p);
@@ -1992,7 +1993,7 @@ sysctl_kern_proc_ovmmap(SYSCTL_HANDLER_ARGS)
 	}
 	kve = malloc(sizeof(*kve), M_TEMP, M_WAITOK);
 
-	map = &p->p_vmspace->vm_map;	/* XXXRW: More locking required? */
+	map = &vm->vm_map;
 	vm_map_lock_read(map);
 	for (entry = map->header.next; entry != &map->header;
 	    entry = entry->next) {
@@ -2164,7 +2165,7 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb)
 	kve = malloc(sizeof(*kve), M_TEMP, M_WAITOK);
 
 	error = 0;
-	map = &vm->vm_map;	/* XXXRW: More locking required? */
+	map = &vm->vm_map;
 	vm_map_lock_read(map);
 	for (entry = map->header.next; entry != &map->header;
 	    entry = entry->next) {

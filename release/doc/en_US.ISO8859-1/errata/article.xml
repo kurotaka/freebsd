@@ -101,51 +101,76 @@
 
 	<tbody>
 	  <row>
-	    <entry><link xlink:href="http://security.freebsd.org/advisories/FreeBSD-SA-12:01.openssl.asc">SA-12:01.openssl</link></entry>
-	    <entry>3&nbsp;May&nbsp;2012</entry>
-	    <entry><para>OpenSSL multiple vulnerabilities</para></entry>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:01.bsnmpd.asc">SA-14:01.bsnmpd</link></entry>
+	    <entry>1&nbsp;January&nbsp;2014</entry>
+	    <entry><para>Fix bsnmpd remote denial of service
+		vulnerability</para></entry>
 	  </row>
 
 	  <row>
-	    <entry><link xlink:href="http://security.freebsd.org/advisories/FreeBSD-SA-12:02.crypt.asc">SA-12:02.crypt</link></entry>
-	    <entry>30&nbsp;May&nbsp;2012</entry>
-	    <entry><para>Incorrect <function>crypt()</function> hashing</para></entry>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:02.ntpd.asc">SA-14:02.ntpd</link></entry>
+	    <entry>1&nbsp;January&nbsp;2014</entry>
+	    <entry><para>Fix ntpd distributed reflection Denial of
+		Service vulnerability</para></entry>
 	  </row>
 
 	  <row>
-	    <entry><link xlink:href="http://security.freebsd.org/advisories/FreeBSD-SA-12:03.bind.asc">SA-12:03.bind</link></entry>
-	    <entry>12&nbsp;June&nbsp;2012</entry>
-	    <entry><para>Incorrect handling of zero-length RDATA fields in &man.named.8;</para></entry>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:03.bind.asc">SA-14:03.ntpd</link></entry>
+	    <entry>1&nbsp;January&nbsp;2014</entry>
+	    <entry><para>Fix BIND remote denial of service
+		vulnerability</para></entry>
 	  </row>
 
 	  <row>
-	    <entry><link xlink:href="http://security.freebsd.org/advisories/FreeBSD-SA-12:04.sysret.asc">SA-12:04.sysret</link></entry>
-	    <entry>12&nbsp;June&nbsp;2012</entry>
-	    <entry><para>Privilege escalation when returning from kernel</para></entry>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:05.nfsserver.asc">SA-14:05.nfsserver</link></entry>
+	    <entry>8&nbsp;April&nbsp;2014</entry>
+	    <entry><para>Fix NFS deadlock vulnerability</para></entry>
 	  </row>
 
 	  <row>
-	    <entry><link xlink:href="http://security.freebsd.org/advisories/FreeBSD-SA-12:05.bind.asc">SA-12:05.bind</link></entry>
-	    <entry>6&nbsp;August&nbsp;2012</entry>
-	    <entry><para>&man.named.8; DNSSEC validation Denial of Service</para></entry>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:06.openssl.asc">SA-14:06.openssl</link></entry>
+	    <entry>8&nbsp;April&nbsp;2014</entry>
+	    <entry><para>Fix ECDSA Cache Side-channel
+		Attack</para></entry>
 	  </row>
 
 	  <row>
-	    <entry><link xlink:href="http://security.freebsd.org/advisories/FreeBSD-SA-12:06.bind.asc">SA-12:06.bind</link></entry>
-	    <entry>22&nbsp;November&nbsp;2012</entry>
-	    <entry><para>Multiple Denial of Service vulnerabilities with &man.named.8;</para></entry>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:08.tcp.asc">SA-14:08.tcp</link></entry>
+	    <entry>30&nbsp;April&nbsp;2014</entry>
+	    <entry><para>Fix TCP reassembly
+		vulnerability</para></entry>
 	  </row>
 
 	  <row>
-	    <entry><link xlink:href="http://security.freebsd.org/advisories/FreeBSD-SA-12:07.hostapd.asc">SA-12:07.hostapd</link></entry>
-	    <entry>22&nbsp;November&nbsp;2012</entry>
-	    <entry><para>Insufficient message length validation for EAP-TLS messages</para></entry>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:11.sendmail.asc">SA-14:11.sendmail</link></entry>
+	    <entry>3&nbsp;June&nbsp;2014</entry>
+	    <entry><para>Fix sendmail improper close-on-exec flag
+		handling</para></entry>
 	  </row>
 
 	  <row>
-	    <entry><link xlink:href="http://security.freebsd.org/advisories/FreeBSD-SA-12:08.linux.asc">SA-12:08.linux</link></entry>
-	    <entry>22&nbsp;November&nbsp;2012</entry>
-	    <entry><para>Linux compatibility layer input validation error</para></entry>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:12.ktrace.asc">SA-14:12.ktrace</link></entry>
+	    <entry>3&nbsp;June&nbsp;2014</entry>
+	    <entry><para>Fix ktrace memory disclosure</para></entry>
+	  </row>
+
+	  <row>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:13.pam.asc">SA-14:13.pam</link></entry>
+	    <entry>3&nbsp;June&nbsp;2014</entry>
+	    <entry><para>Fix incorrect error handling in PAM policy
+		parser</para></entry>
+	  </row>
+
+	  <row>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:14.openssl.asc">SA-14:14.openssl</link></entry>
+	    <entry>5&nbsp;June&nbsp;2014</entry>
+	    <entry><para>Multiple vulnerabilities</para></entry>
+	  </row>
+
+	  <row>
+	    <entry><link xlink:href="http://www.freebsd.org/security/advisories/FreeBSD-SA-14:16.file.asc">SA-14:16.file</link></entry>
+	    <entry>24&nbsp;June&nbsp;2014</entry>
+	    <entry><para>Multiple vulnerabilities</para></entry>
 	  </row>
 	</tbody>
       </tgroup>
@@ -155,33 +180,6 @@
   <sect1 xml:id="late-news">
     <title>Late-Breaking News</title>
 
-    <para>[November 2, 2012] The current &man.mfi.4; driver has an
-      overflow bug when handling disks larger than 2^32 sectors in
-      SYSPD volumes, also known as JBODs, which will cause data
-      corruption.  This bug has been fixed on this &os;-CURRENT but
-      was too late for inclusion in this release.  An Errata Notice
-      for &release.current; is planned.</para>
-
-    <para>[December 25, 2012] The Installtion Instructions had the
-      following wrong information about upgrading procedure.  All of
-      them have been fixed in the online version.</para>
-
-    <itemizedlist>
-      <listitem>
-	<para>The link URL of <quote>upgrading section in the Release
-	    Notes</quote>, branch names where upcoming Security
-	  Advisories or Errata Notices will be applied, and a
-	  command line argument of &man.freebsd-update.8; were ones
-	  for 9.0-RELEASE, not for &release.current;.</para>
-      </listitem>
-
-      <listitem>
-	<para>The list of releases supported by &man.freebsd-update.8;
-	  utility were incorrect.  For 9.X, The following versions are
-	  supported: <literal>9.0-RELEASE</literal>,
-	  <literal>9.1-BETA1</literal>, and
-	  <literal>9.1-RC[123]</literal>.</para>
-      </listitem>
-    </itemizedlist>
+    <para>No late-breaking news.</para>
   </sect1>
 </article>

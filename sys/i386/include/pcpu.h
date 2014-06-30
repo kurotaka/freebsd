@@ -76,14 +76,15 @@ struct shadow_time_info {
 	int	pc_virq_to_irq[NR_VIRQS];				\
 	int	pc_ipi_to_irq[NR_IPIS]	
 
-#elif defined(XENHVM)
+#elif defined(XENHVM) && !defined(MODXENHVM)
 
+/* This is now unused, but remains here for KBI compatibility reasons. */
 #define	PCPU_XEN_FIELDS							\
 	;								\
 	unsigned int pc_last_processed_l1i;				\
 	unsigned int pc_last_processed_l2i
 
-#else /* !XEN && !XENHVM */
+#else /* !XEN && (!XENHVM || MODXENHVM) */
 
 #define PCPU_XEN_FIELDS
 

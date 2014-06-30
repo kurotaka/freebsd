@@ -1334,8 +1334,15 @@ service_iq(struct sge_iq *iq, int budget)
 				    V_SEINTARM(V_QINTR_TIMER_IDX(X_TIMERREG_UPDATE_CIDX)));
 				ndescs = 0;
 
-				if (budget)
+				if (budget) {
+					if (fl_bufs_used) {
+						FL_LOCK(fl);
+						fl->needed += fl_bufs_used;
+						refill_fl(sc, fl, 32);
+						FL_UNLOCK(fl);
+					}
 					return (EINPROGRESS);
+				}
 			}
 		}
 
@@ -1462,22 +1469,22 @@ get_scatter_segment(struct adapter *sc, struct sge_fl *fl, int total, int flags)
 		/* copy data to mbuf */
 		bcopy(payload, mtod(m, caddr_t), len);
 
-	} else if (sd->nmbuf * MSIZE < cll->region1) {
+	} else if (sd->nimbuf * MSIZE < cll->region1) {
 
 		/*
 		 * There's spare room in the cluster for an mbuf.  Create one
-		 * and associate it with the payload that's in the cluster too.
+		 * and associate it with the payload that's in the cluster.
 		 */
 
 		MPASS(clm != NULL);
-		m = (struct mbuf *)(sd->cl + sd->nmbuf * MSIZE);
+		m = (struct mbuf *)(sd->cl + sd->nimbuf * MSIZE);
 		/* No bzero required */
 		if (m_init(m, NULL, 0, M_NOWAIT, MT_DATA, flags | M_NOFREE))
 			return (NULL);
 		fl->mbuf_inlined++;
 		m_extaddref(m, payload, padded_len, &clm->refcount, rxb_free,
 		    swz->zone, sd->cl);
-		sd->nmbuf++;
+		sd->nimbuf++;
 
 	} else {
 
@@ -1491,10 +1498,11 @@ get_scatter_segment(struct adapter *sc, struct sge_fl *fl, int total, int flags)
 		if (m == NULL)
 			return (NULL);
 		fl->mbuf_allocated++;
-		if (clm != NULL)
+		if (clm != NULL) {
 			m_extaddref(m, payload, padded_len, &clm->refcount,
 			    rxb_free, swz->zone, sd->cl);
-		else {
+			sd->nembuf++;
+		} else {
 			m_cljset(m, sd->cl, swz->type);
 			sd->cl = NULL;	/* consumed, not a recycle candidate */
 		}
@@ -1536,6 +1544,7 @@ get_fl_payload(struct adapter *sc, struct sge_fl *fl, uint32_t len_newbuf,
 	nbuf = 0;
 	len = G_RSPD_LEN(len_newbuf);
 	if (__predict_false(fl->m0 != NULL)) {
+		M_ASSERTPKTHDR(fl->m0);
 		MPASS(len == fl->m0->m_pkthdr.len);
 		MPASS(fl->remaining < len);
 
@@ -1559,6 +1568,8 @@ get_fl_payload(struct adapter *sc, struct sge_fl *fl, uint32_t len_newbuf,
 	 */
 
 	m0 = get_scatter_segment(sc, fl, len, M_PKTHDR);
+	if (m0 == NULL)
+		goto done;
 	len -= m0->m_len;
 	pnext = &m0->m_next;
 	while (len > 0) {
@@ -1570,7 +1581,8 @@ get_segment:
 			fl->m0 = m0;
 			fl->pnext = pnext;
 			fl->remaining = len;
-			return (NULL);
+			m0 = NULL;
+			goto done;
 		}
 		*pnext = m;
 		pnext = &m->m_next;
@@ -1579,7 +1591,7 @@ get_segment:
 	*pnext = NULL;
 	if (fl->rx_offset == 0)
 		nbuf++;
-
+done:
 	(*fl_bufs_used) += nbuf;
 	return (m0);
 }
@@ -1667,7 +1679,7 @@ t4_wrq_tx_locked(struct adapter *sc, struct sge_wrq *wrq, struct wrqe *wr)
 
 	can_reclaim = reclaimable(eq);
 	if (__predict_false(eq->flags & EQ_STALLED)) {
-		if (can_reclaim < tx_resume_threshold(eq))
+		if (eq->avail + can_reclaim < tx_resume_threshold(eq))
 			return;
 		eq->flags &= ~EQ_STALLED;
 		eq->unstalled++;
@@ -1788,7 +1800,7 @@ t4_eth_tx(struct ifnet *ifp, struct sge_txq *txq, struct mbuf *m)
 
 	can_reclaim = reclaimable(eq);
 	if (__predict_false(eq->flags & EQ_STALLED)) {
-		if (can_reclaim < tx_resume_threshold(eq)) {
+		if (eq->avail + can_reclaim < tx_resume_threshold(eq)) {
 			txq->m = m;
 			return (0);
 		}
@@ -1962,7 +1974,8 @@ t4_update_fl_bufsize(struct ifnet *ifp)
 int
 can_resume_tx(struct sge_eq *eq)
 {
-	return (reclaimable(eq) >= tx_resume_threshold(eq));
+
+	return (eq->avail + reclaimable(eq) >= tx_resume_threshold(eq));
 }
 
 static inline void
@@ -2585,7 +2598,7 @@ eth_eq_alloc(struct adapter *sc, struct port_info *pi, struct sge_eq *eq)
 	    V_FW_EQ_ETH_CMD_VFN(0));
 	c.alloc_to_len16 = htobe32(F_FW_EQ_ETH_CMD_ALLOC |
 	    F_FW_EQ_ETH_CMD_EQSTART | FW_LEN16(c));
-	c.viid_pkd = htobe32(V_FW_EQ_ETH_CMD_VIID(pi->viid));
+	c.autoequiqe_to_viid = htobe32(V_FW_EQ_ETH_CMD_VIID(pi->viid));
 	c.fetchszm_to_iqid =
 	    htobe32(V_FW_EQ_ETH_CMD_HOSTFCMODE(X_HOSTFCMODE_STATUS_PAGE) |
 		V_FW_EQ_ETH_CMD_PCIECHN(eq->tx_chan) | F_FW_EQ_ETH_CMD_FETCHRO |
@@ -3013,7 +3026,7 @@ refill_fl(struct adapter *sc, struct sge_fl *fl, int nbufs)
 
 		if (sd->cl != NULL) {
 
-			if (sd->nmbuf == 0) {
+			if (sd->nimbuf + sd->nembuf == 0) {
 				/*
 				 * Fast recycle without involving any atomics on
 				 * the cluster's metadata (if the cluster has
@@ -3022,6 +3035,11 @@ refill_fl(struct adapter *sc, struct sge_fl *fl, int nbufs)
 				 * fit within a single mbuf each.
 				 */
 				fl->cl_fast_recycled++;
+#ifdef INVARIANTS
+				clm = cl_metadata(sc, fl, &sd->cll, sd->cl);
+				if (clm != NULL)
+					MPASS(clm->refcount == 1);
+#endif
 				goto recycled_fast;
 			}
 
@@ -3067,7 +3085,8 @@ recycled:
 #endif
 			clm->refcount = 1;
 		}
-		sd->nmbuf = 0;
+		sd->nimbuf = 0;
+		sd->nembuf = 0;
 recycled_fast:
 		fl->pending++;
 		fl->needed--;
@@ -3136,7 +3155,7 @@ free_fl_sdesc(struct adapter *sc, struct sge_fl *fl)
 
 		cll = &sd->cll;
 		clm = cl_metadata(sc, fl, cll, sd->cl);
-		if (sd->nmbuf == 0 ||
+		if (sd->nimbuf + sd->nembuf == 0 ||
 		    (clm && atomic_fetchadd_int(&clm->refcount, -1) == 1)) {
 			uma_zfree(sc->sge.sw_zone_info[cll->zidx].zone, sd->cl);
 		}

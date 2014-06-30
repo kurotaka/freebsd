@@ -209,9 +209,11 @@ SUBDIR=	\
 	${_mly} \
 	mmc \
 	mmcsd \
+	mpr \
 	mps \
 	mpt \
 	mqueue \
+	mrsas \
 	msdosfs \
 	msdosfs_iconv \
 	${_mse} \
@@ -360,6 +362,7 @@ SUBDIR=	\
 	${_wpifw} \
 	${_x86bios} \
 	${_xe} \
+	${_xenhvm} \
 	xfs \
 	xl \
 	${_zfs} \
@@ -367,6 +370,7 @@ SUBDIR=	\
 
 .if ${MACHINE_CPUARCH} == "i386" || ${MACHINE_CPUARCH} == "amd64"
 _filemon=	filemon
+_xenhvm=	xenhvm
 .endif
 
 .if ${MACHINE_CPUARCH} != "powerpc" && ${MACHINE_CPUARCH} != "arm" && \
