@@ -39,7 +39,7 @@ CFLAGS+=${CANCELPOINTS_CFLAGS}
 #
 # Only link with static libgcc.a (no libgcc_eh.a).
 #
-DPADD+=	${LIBGCC}
+DPADD+=	${LIBGCC} ${LIBSSP_NONSHARED}
 LDFLAGS+= -nodefaultlibs
 LDADD+= -lgcc -lssp_nonshared
 
@@ -63,6 +63,7 @@ NOASM=
 .include "${.CURDIR}/inet/Makefile.inc"
 .include "${.CURDIR}/isc/Makefile.inc"
 .include "${.CURDIR}/locale/Makefile.inc"
+.include "${.CURDIR}/md/Makefile.inc"
 .include "${.CURDIR}/nameser/Makefile.inc"
 .include "${.CURDIR}/net/Makefile.inc"
 .include "${.CURDIR}/nls/Makefile.inc"

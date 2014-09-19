@@ -75,7 +75,7 @@ proc_ops(int op, proc_t *p, void *kaddr, off_t uaddr, size_t len)
 	uio.uio_td = curthread;
 	uio.uio_rw = op;
 	PHOLD(p);
-	if (proc_rwmem(p, &uio) < 0) {
+	if (proc_rwmem(p, &uio) != 0) {
 		PRELE(p);
 		return (-1);
 	}
@@ -273,7 +273,20 @@ fasttrap_anarg(struct reg *rp, int function_entry, int argno)
 		 * registers.
 		 */
 		if (argno < 6)
-			return ((&rp->r_rdi)[argno]);
+			switch (argno) {
+			case 0:
+				return (rp->r_rdi);
+			case 1:
+				return (rp->r_rsi);
+			case 2:
+				return (rp->r_rdx);
+			case 3:
+				return (rp->r_rcx);
+			case 4:
+				return (rp->r_r8);
+			case 5:
+				return (rp->r_r9);
+			}
 
 		stack = (uintptr_t *)rp->r_rsp;
 		DTRACE_CPUFLAG_SET(CPU_DTRACE_NOFAULT);
@@ -1526,7 +1539,6 @@ fasttrap_pid_probe(struct reg *rp)
 		uint_t i = 0;
 #if defined(sun)
 		klwp_t *lwp = ttolwp(curthread);
-#endif
 
 		/*
 		 * Compute the address of the ulwp_t and step over the
@@ -1534,7 +1546,6 @@ fasttrap_pid_probe(struct reg *rp)
 		 * thread pointer is very different on 32- and 64-bit
 		 * kernels.
 		 */
-#if defined(sun)
 #if defined(__amd64)
 		if (p->p_model == DATAMODEL_LP64) {
 			addr = lwp->lwp_pcb.pcb_fsbase;
@@ -1547,13 +1558,23 @@ fasttrap_pid_probe(struct reg *rp)
 		addr = USD_GETBASE(&lwp->lwp_pcb.pcb_gsdesc);
 		addr += sizeof (void *);
 #endif
-#endif /* sun */
-#ifdef __i386__
-		addr = USD_GETBASE(&curthread->td_pcb->pcb_gsd);
 #else
-		addr = curthread->td_pcb->pcb_gsbase;
-#endif
-		addr += sizeof (void *);
+		fasttrap_scrspace_t *scrspace;
+		scrspace = fasttrap_scraddr(curthread, tp->ftt_proc);
+		if (scrspace == NULL) {
+			/*
+			 * We failed to allocate scratch space for this thread.
+			 * Try to write the original instruction back out and
+			 * reset the pc.
+			 */
+			if (fasttrap_copyout(tp->ftt_instr, (void *)pc,
+			    tp->ftt_size))
+				fasttrap_sigtrap(p, curthread, pc);
+			new_pc = pc;
+			break;
+		}
+		addr = scrspace->ftss_addr;
+#endif /* sun */
 
 		/*
 		 * Generic Instruction Tracing
