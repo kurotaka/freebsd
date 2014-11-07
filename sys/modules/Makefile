@@ -123,6 +123,7 @@ SUBDIR=	\
 	${_hptrr} \
 	hwpmc \
 	${_i2c} \
+	${_ibcore} \
 	${_ibcs2} \
 	${_ichwd} \
 	${_ida} \
@@ -146,6 +147,7 @@ SUBDIR=	\
 	${_iir} \
 	${_io} \
 	ipdivert \
+	${_ipoib} \
 	${_ipfilter} \
 	${_ipfw} \
 	ipfw_nat \
@@ -370,7 +372,6 @@ SUBDIR=	\
 
 .if ${MACHINE_CPUARCH} == "i386" || ${MACHINE_CPUARCH} == "amd64"
 _filemon=	filemon
-_xenhvm=	xenhvm
 .endif
 
 .if ${MACHINE_CPUARCH} != "powerpc" && ${MACHINE_CPUARCH} != "arm" && \
@@ -490,11 +491,17 @@ _fe=		fe
 _glxiic=	glxiic
 _glxsb=		glxsb
 _i2c=		i2c
+.if ${MK_OFED} != "no" || defined(ALL_MODULES)
+_ibcore=        ibcore
+.endif
 _ibcs2=		ibcs2
 _ie=		ie
 _if_ndis=	if_ndis
 _igb=		igb
 _io=		io
+.if ${MK_OFED} != "no" || defined(ALL_MODULES)
+_ipoib=         ipoib
+.endif
 _lindev=	lindev
 _linprocfs=	linprocfs
 _linsysfs=	linsysfs
@@ -616,6 +623,7 @@ _twa=		twa
 _vesa=		vesa
 _virtio=	virtio
 _x86bios=	x86bios
+_xenhvm=	xenhvm
 .elif ${MACHINE} == "pc98"
 _canbepm=	canbepm
 _canbus=	canbus
@@ -670,6 +678,9 @@ _hptnr=		hptnr
 _hptrr=		hptrr
 .endif
 _i2c=		i2c
+.if ${MK_OFED} != "no" || defined(ALL_MODULES)
+_ibcore=        ibcore
+.endif
 _ichwd=		ichwd
 _ida=		ida
 _if_ndis=	if_ndis
@@ -677,6 +688,9 @@ _igb=		igb
 _iir=		iir
 _io=		io
 _ipmi=		ipmi
+.if ${MK_OFED} != "no" || defined(ALL_MODULES)
+_ipoib=         ipoib
+.endif
 _ips=		ips
 _ipw=		ipw
 .if ${MK_SOURCELESS_UCODE} != "no"
@@ -741,6 +755,7 @@ _viawd=		viawd
 _virtio=	virtio
 _vxge=  	vxge
 _x86bios=	x86bios
+_xenhvm=	xenhvm
 _wbwd=		wbwd
 _wi=		wi
 _wpi=		wpi

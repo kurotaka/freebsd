@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Isilon Systems, Inc.
  * Copyright (c) 2010 iX Systems, Inc.
  * Copyright (c) 2010 Panasas, Inc.
+ * Copyright (c) 2013, 2014 Mellanox Technologies, Ltd.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,9 +27,11 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef	_LINUX_STDDEF_H_
-#define	_LINUX_STDDEF_H_
+#ifndef _LINUX_CLOCKSOURCE_H
+#define _LINUX_CLOCKSOURCE_H
 
-#include <sys/stddef.h>
+/* clocksource cycle base type */
+typedef u64 cycle_t;
 
-#endif	/* _LINUX_STDDEF_H_ */
+
+#endif /* _LINUX_CLOCKSOURCE_H */

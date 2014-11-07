@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2006, 2007 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2007 Mellanox Technologies. All rights reserved.
+ * Copyright (c) 2014 Mellanox Technologies Ltd.  All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -31,40 +30,15 @@
  * SOFTWARE.
  */
 
-#include <linux/init.h>
-#include <linux/errno.h>
+#ifndef _MLX4_UTILS_H_
+#define	_MLX4_UTILS_H_
 
-#include "mlx4.h"
+/* Lagg flags */
+#define	MLX4_F_HASHL2		0x00000001	/* hash layer 2 */
+#define	MLX4_F_HASHL3		0x00000002	/* hash layer 3 */
+#define	MLX4_F_HASHL4		0x00000004	/* hash layer 4 */
+#define	MLX4_F_HASHMASK		0x00000007
 
-int mlx4_xrcd_alloc(struct mlx4_dev *dev, u32 *xrcdn)
-{
-	struct mlx4_priv *priv = mlx4_priv(dev);
+uint32_t mlx4_en_hashmbuf(uint32_t flags, struct mbuf *m, uint32_t key);
 
-	*xrcdn = mlx4_bitmap_alloc(&priv->xrcd_bitmap);
-	if (*xrcdn == -1)
-		return -ENOMEM;
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(mlx4_xrcd_alloc);
-
-void mlx4_xrcd_free(struct mlx4_dev *dev, u32 xrcdn)
-{
-	mlx4_bitmap_free(&mlx4_priv(dev)->xrcd_bitmap, xrcdn);
-}
-EXPORT_SYMBOL_GPL(mlx4_xrcd_free);
-
-int __devinit mlx4_init_xrcd_table(struct mlx4_dev *dev)
-{
-	struct mlx4_priv *priv = mlx4_priv(dev);
-
-	return mlx4_bitmap_init(&priv->xrcd_bitmap, (1 << 16),
-				(1 << 16) - 1, dev->caps.reserved_xrcds + 1, 0);
-}
-
-void mlx4_cleanup_xrcd_table(struct mlx4_dev *dev)
-{
-	mlx4_bitmap_cleanup(&mlx4_priv(dev)->xrcd_bitmap);
-}
-
-
+#endif		/* _MLX4_UTILS_H_ */
