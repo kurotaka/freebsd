@@ -1193,6 +1193,7 @@ bootstrap-tools:
     ${_gensnmptree} \
     usr.sbin/config \
     ${_crunchgen} \
+    gnu/usr.bin/texinfo \
     ${_nmtree}
 	${_+_}@${ECHODIR} "===> ${_tool} (obj,depend,all,install)"; \
 		cd ${.CURDIR}/${_tool}; \
