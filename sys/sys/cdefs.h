@@ -239,7 +239,7 @@
 #define	_Static_assert(e, s)	static_assert(e, s)
 /* FIXME: change this to thread_local when clang in base supports it */
 #define	_Thread_local		__thread
-#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(lint)
 /* Do nothing.  They are language keywords. */
 #else
 /* Not supported.  Implement them using our versions. */
@@ -250,7 +250,8 @@
 #ifdef __COUNTER__
 #define	_Static_assert(x, y)	__Static_assert(x, __COUNTER__)
 #define	__Static_assert(x, y)	___Static_assert(x, y)
-#define	___Static_assert(x, y)	typedef char __assert_ ## y[(x) ? 1 : -1]
+#define	___Static_assert(x, y)	typedef char __assert_ ## y[(x) ? 1 : -1] \
+				__unused
 #else
 #define	_Static_assert(x, y)	struct __hack
 #endif

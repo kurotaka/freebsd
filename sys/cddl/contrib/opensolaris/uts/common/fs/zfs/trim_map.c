@@ -255,17 +255,23 @@ trim_map_segment_add(trim_map_t *tm, uint64_t start, uint64_t end, uint64_t txg)
 		ts_after->ts_start = ts_before->ts_start;
 		ts_after->ts_txg = txg;
 		ts_after->ts_time = time;
+		list_remove(&tm->tm_head, ts_after);
+		list_insert_tail(&tm->tm_head, ts_after);
 		kmem_free(ts_before, sizeof (*ts_before));
 	} else if (merge_before) {
 		TRIM_MAP_SINC(tm, end - ts_before->ts_end);
 		ts_before->ts_end = end;
 		ts_before->ts_txg = txg;
 		ts_before->ts_time = time;
+		list_remove(&tm->tm_head, ts_before);
+		list_insert_tail(&tm->tm_head, ts_before);
 	} else if (merge_after) {
 		TRIM_MAP_SINC(tm, ts_after->ts_start - start);
 		ts_after->ts_start = start;
 		ts_after->ts_txg = txg;
 		ts_after->ts_time = time;
+		list_remove(&tm->tm_head, ts_after);
+		list_insert_tail(&tm->tm_head, ts_after);
 	} else {
 		TRIM_MAP_SINC(tm, end - start);
 		TRIM_MAP_QINC(tm);
@@ -457,7 +463,7 @@ trim_map_vdev_commit(spa_t *spa, zio_t *zio, vdev_t *vd)
 	if (tm == NULL)
 		return;
 
-	timelimit = gethrtime() - trim_timeout * NANOSEC;
+	timelimit = gethrtime() - (hrtime_t)trim_timeout * NANOSEC;
 	if (vd->vdev_isl2cache) {
 		txgsafe = UINT64_MAX;
 		txgtarget = UINT64_MAX;

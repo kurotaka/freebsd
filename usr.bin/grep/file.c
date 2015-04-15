@@ -41,7 +41,6 @@ __FBSDID("$FreeBSD$");
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <lzma.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +48,10 @@ __FBSDID("$FreeBSD$");
 #include <wchar.h>
 #include <wctype.h>
 #include <zlib.h>
+
+#ifndef WITHOUT_LZMA
+#include <lzma.h>
+#endif
 
 #ifndef WITHOUT_BZIP2
 #include <bzlib.h>
@@ -60,7 +63,11 @@ __FBSDID("$FreeBSD$");
 #define	LNBUFBUMP	80
 
 static gzFile gzbufdesc;
+#ifndef WITHOUT_LZMA
 static lzma_stream lstrm = LZMA_STREAM_INIT;
+static lzma_action laction;
+static uint8_t lin_buf[MAXBUFSIZ];
+#endif
 #ifndef WITHOUT_BZIP2
 static BZFILE* bzbufdesc;
 #endif
@@ -116,36 +123,38 @@ grep_refill(struct file *f)
 			nr = -1;
 		}
 #endif
+#ifndef WITHOUT_LZMA
 	} else if ((filebehave == FILE_XZ) || (filebehave == FILE_LZMA)) {
-		lzma_action action = LZMA_RUN;
-		uint8_t in_buf[MAXBUFSIZ];
 		lzma_ret ret;
-
-		ret = (filebehave == FILE_XZ) ?
-		    lzma_stream_decoder(&lstrm, UINT64_MAX,
-		    LZMA_CONCATENATED) :
-		    lzma_alone_decoder(&lstrm, UINT64_MAX);
-
-		if (ret != LZMA_OK)
-			return (-1);
-
 		lstrm.next_out = buffer;
-		lstrm.avail_out = MAXBUFSIZ;
-		lstrm.next_in = in_buf;
-		nr = read(f->fd, in_buf, MAXBUFSIZ);
 
-		if (nr < 0)
-			return (-1);
-		else if (nr == 0)
-			action = LZMA_FINISH;
+		do {
+			if (lstrm.avail_in == 0) {
+				lstrm.next_in = lin_buf;
+				nr = read(f->fd, lin_buf, MAXBUFSIZ);
 
-		lstrm.avail_in = nr;
-		ret = lzma_code(&lstrm, action);
+				if (nr < 0)
+					return (-1);
+				else if (nr == 0)
+					laction = LZMA_FINISH;
 
-		if (ret != LZMA_OK && ret != LZMA_STREAM_END)
-			return (-1);
-		bufrem = MAXBUFSIZ - lstrm.avail_out;
+				lstrm.avail_in = nr;
+			}
+
+			ret = lzma_code(&lstrm, laction);
+
+			if (ret != LZMA_OK && ret != LZMA_STREAM_END)
+				return (-1);
+
+			if (lstrm.avail_out == 0 || ret == LZMA_STREAM_END) {
+				bufrem = MAXBUFSIZ - lstrm.avail_out;
+				lstrm.next_out = buffer;
+				lstrm.avail_out = MAXBUFSIZ;
+			}
+		} while (bufrem == 0 && ret != LZMA_STREAM_END);
+
 		return (0);
+#endif	/* WIHTOUT_LZMA */
 	} else
 		nr = read(f->fd, buffer, MAXBUFSIZ);
 
@@ -283,6 +292,23 @@ grep_open(const char *path)
 	if (filebehave == FILE_BZIP &&
 	    (bzbufdesc = BZ2_bzdopen(f->fd, "r")) == NULL)
 		goto error2;
+#endif
+#ifndef WITHOUT_LZMA
+	else if ((filebehave == FILE_XZ) || (filebehave == FILE_LZMA)) {
+		lzma_ret ret;
+
+		ret = (filebehave == FILE_XZ) ?
+			lzma_stream_decoder(&lstrm, UINT64_MAX,
+					LZMA_CONCATENATED) :
+			lzma_alone_decoder(&lstrm, UINT64_MAX);
+
+		if (ret != LZMA_OK)
+			goto error2;
+
+		lstrm.avail_in = 0;
+		lstrm.avail_out = MAXBUFSIZ;
+		laction = LZMA_RUN;
+	}
 #endif
 
 	/* Fill read buffer, also catches errors early */

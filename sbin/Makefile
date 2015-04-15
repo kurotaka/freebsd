@@ -9,7 +9,6 @@ SUBDIR=adjkerntz \
 	atacontrol \
 	badsect \
 	camcontrol \
-	ccdconfig \
 	clri \
 	comcontrol \
 	conscontrol \
@@ -31,8 +30,6 @@ SUBDIR=adjkerntz \
 	ggate \
 	growfs \
 	gvinum \
-	hastctl \
-	hastd \
 	ifconfig \
 	init \
 	iscontrol \
@@ -78,8 +75,17 @@ SUBDIR=adjkerntz \
 SUBDIR+=	atm
 .endif
 
+.if ${MK_CCD} != "no"
+SUBDIR+=	ccdconfig
+.endif
+
 .if ${MK_CXX} != "no"
 SUBDIR+=	devd
+.endif
+
+.if ${MK_HAST} != "no"
+SUBDIR+=	hastctl
+SUBDIR+=	hastd
 .endif
 
 .if ${MK_IPFILTER} != "no"

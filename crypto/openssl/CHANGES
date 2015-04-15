@@ -2,6 +2,169 @@
  OpenSSL CHANGES
  _______________
 
+ Changes between 0.9.8ze and 0.9.8zf [19 Mar 2015]
+
+  *) Segmentation fault in ASN1_TYPE_cmp fix
+
+     The function ASN1_TYPE_cmp will crash with an invalid read if an attempt is
+     made to compare ASN.1 boolean types. Since ASN1_TYPE_cmp is used to check
+     certificate signature algorithm consistency this can be used to crash any
+     certificate verification operation and exploited in a DoS attack. Any
+     application which performs certificate verification is vulnerable including
+     OpenSSL clients and servers which enable client authentication.
+     (CVE-2015-0286)
+     [Stephen Henson]
+
+  *) ASN.1 structure reuse memory corruption fix
+
+     Reusing a structure in ASN.1 parsing may allow an attacker to cause
+     memory corruption via an invalid write. Such reuse is and has been
+     strongly discouraged and is believed to be rare.
+
+     Applications that parse structures containing CHOICE or ANY DEFINED BY
+     components may be affected. Certificate parsing (d2i_X509 and related
+     functions) are however not affected. OpenSSL clients and servers are
+     not affected.
+     (CVE-2015-0287)
+     [Stephen Henson]
+
+  *) PKCS7 NULL pointer dereferences fix
+
+     The PKCS#7 parsing code does not handle missing outer ContentInfo
+     correctly. An attacker can craft malformed ASN.1-encoded PKCS#7 blobs with
+     missing content and trigger a NULL pointer dereference on parsing.
+
+     Applications that verify PKCS#7 signatures, decrypt PKCS#7 data or
+     otherwise parse PKCS#7 structures from untrusted sources are
+     affected. OpenSSL clients and servers are not affected.
+
+     This issue was reported to OpenSSL by Michal Zalewski (Google).
+     (CVE-2015-0289)
+     [Emilia Käsper]
+
+  *) DoS via reachable assert in SSLv2 servers fix
+
+     A malicious client can trigger an OPENSSL_assert (i.e., an abort) in
+     servers that both support SSLv2 and enable export cipher suites by sending
+     a specially crafted SSLv2 CLIENT-MASTER-KEY message.
+
+     This issue was discovered by Sean Burford (Google) and Emilia Käsper
+     (OpenSSL development team).
+     (CVE-2015-0293)
+     [Emilia Käsper]
+
+  *) Use After Free following d2i_ECPrivatekey error fix
+
+     A malformed EC private key file consumed via the d2i_ECPrivateKey function
+     could cause a use after free condition. This, in turn, could cause a double
+     free in several private key parsing functions (such as d2i_PrivateKey
+     or EVP_PKCS82PKEY) and could lead to a DoS attack or memory corruption
+     for applications that receive EC private keys from untrusted
+     sources. This scenario is considered rare.
+
+     This issue was discovered by the BoringSSL project and fixed in their
+     commit 517073cd4b.
+     (CVE-2015-0209)
+     [Matt Caswell]
+
+  *) X509_to_X509_REQ NULL pointer deref fix
+
+     The function X509_to_X509_REQ will crash with a NULL pointer dereference if
+     the certificate key is invalid. This function is rarely used in practice.
+
+     This issue was discovered by Brian Carpenter.
+     (CVE-2015-0288)
+     [Stephen Henson]
+
+  *) Removed the export and SSLv2 ciphers from the DEFAULT ciphers
+     [Kurt Roeckx]
+
+ Changes between 0.9.8zd and 0.9.8ze [15 Jan 2015]
+
+  *) Build fixes for the Windows and OpenVMS platforms
+     [Matt Caswell and Richard Levitte]
+
+ Changes between 0.9.8zc and 0.9.8zd [8 Jan 2015]
+
+  *) Fix DTLS segmentation fault in dtls1_get_record. A carefully crafted DTLS
+     message can cause a segmentation fault in OpenSSL due to a NULL pointer
+     dereference. This could lead to a Denial Of Service attack. Thanks to
+     Markus Stenberg of Cisco Systems, Inc. for reporting this issue.
+     (CVE-2014-3571)
+     [Steve Henson]
+
+  *) Fix issue where no-ssl3 configuration sets method to NULL. When openssl is
+     built with the no-ssl3 option and a SSL v3 ClientHello is received the ssl
+     method would be set to NULL which could later result in a NULL pointer
+     dereference. Thanks to Frank Schmirler for reporting this issue.
+     (CVE-2014-3569)
+     [Kurt Roeckx]
+
+  *) Abort handshake if server key exchange message is omitted for ephemeral
+     ECDH ciphersuites.
+
+     Thanks to Karthikeyan Bhargavan of the PROSECCO team at INRIA for
+     reporting this issue.
+     (CVE-2014-3572)
+     [Steve Henson]
+
+  *) Remove non-export ephemeral RSA code on client and server. This code
+     violated the TLS standard by allowing the use of temporary RSA keys in
+     non-export ciphersuites and could be used by a server to effectively
+     downgrade the RSA key length used to a value smaller than the server
+     certificate. Thanks for Karthikeyan Bhargavan of the PROSECCO team at
+     INRIA or reporting this issue.
+     (CVE-2015-0204)
+     [Steve Henson]
+
+  *) Fix various certificate fingerprint issues.
+
+     By using non-DER or invalid encodings outside the signed portion of a
+     certificate the fingerprint can be changed without breaking the signature.
+     Although no details of the signed portion of the certificate can be changed
+     this can cause problems with some applications: e.g. those using the
+     certificate fingerprint for blacklists.
+
+     1. Reject signatures with non zero unused bits.
+
+     If the BIT STRING containing the signature has non zero unused bits reject
+     the signature. All current signature algorithms require zero unused bits.
+
+     2. Check certificate algorithm consistency.
+
+     Check the AlgorithmIdentifier inside TBS matches the one in the
+     certificate signature. NB: this will result in signature failure
+     errors for some broken certificates.
+
+     Thanks to Konrad Kraszewski from Google for reporting this issue.
+
+     3. Check DSA/ECDSA signatures use DER.
+
+     Reencode DSA/ECDSA signatures and compare with the original received
+     signature. Return an error if there is a mismatch.
+
+     This will reject various cases including garbage after signature
+     (thanks to Antti Karjalainen and Tuomo Untinen from the Codenomicon CROSS
+     program for discovering this case) and use of BER or invalid ASN.1 INTEGERs
+     (negative or with leading zeroes).
+
+     Further analysis was conducted and fixes were developed by Stephen Henson
+     of the OpenSSL core team.
+
+     (CVE-2014-8275)
+     [Steve Henson]
+
+   *) Correct Bignum squaring. Bignum squaring (BN_sqr) may produce incorrect
+      results on some platforms, including x86_64. This bug occurs at random
+      with a very low probability, and is not known to be exploitable in any
+      way, though its exact impact is difficult to determine. Thanks to Pieter
+      Wuille (Blockstream) who reported this issue and also suggested an initial
+      fix. Further analysis was conducted by the OpenSSL development team and
+      Adam Langley of Google. The final fix was developed by Andy Polyakov of
+      the OpenSSL core team.
+      (CVE-2014-3570)
+      [Andy Polyakov]
+
  Changes between 0.9.8zb and 0.9.8zc [15 Oct 2014]
 
   *) Session Ticket Memory Leak.

@@ -234,6 +234,7 @@ CROSSENV+=	GROFF_BIN_PATH=${WORLDTMP}/legacy/usr/bin \
 		GROFF_TMAC_PATH=${WORLDTMP}/legacy/usr/share/tmac
 .endif
 
+_BOOTSTRAP_MAKEINFO?=	${MK_INFO}
 # bootstrap-tools stage
 BMAKEENV=	INSTALL="sh ${.CURDIR}/tools/install.sh" \
 		PATH=${BPATH}:${PATH} \
@@ -248,6 +249,7 @@ BMAKE=		MAKEOBJDIRPREFIX=${WORLDTMP} \
 		SSP_CFLAGS= \
 		-DWITHOUT_HTML -DWITHOUT_INFO -DNO_LINT -DWITHOUT_MAN \
 		-DNO_PIC -DWITHOUT_PROFILE -DNO_SHARED \
+		_BOOTSTRAP_MAKEINFO=${_BOOTSTRAP_MAKEINFO} \
 		-DNO_CPU_CFLAGS -DNO_WARNS -DNO_CTF -DEARLY_BUILD
 
 # build-tools stage
@@ -729,6 +731,7 @@ MTREE_MAGIC?=	mtree 2.0
 
 distributeworld installworld: installcheck installcheck_UGID
 	mkdir -p ${INSTALLTMP}
+	export PATH=${BPATH}:${PATH} ; \
 	progs=$$(for prog in ${ITOOLS}; do \
 		if progpath=`which $$prog`; then \
 			echo $$progpath; \
@@ -1091,6 +1094,8 @@ legacy:
 #
 # bootstrap-tools: Build tools needed for compatibility
 #
+_bt=		_bootstrap-tools	
+
 .if ${MK_GAMES} != "no"
 _strfile=	games/fortune/strfile
 .endif
@@ -1122,11 +1127,15 @@ _lex=		usr.bin/lex
 .if ${BOOTSTRAPPING} < 900006 || ${BOOTSTRAPPING} >= 1000013
 _yacc=		lib/liby \
 		usr.bin/yacc
+
+${_bt}-usr.bin/yacc: ${_bt}-lib/liby
 .endif
 
 .if ${BOOTSTRAPPING} < 1000026
 _nmtree=	lib/libnetbsd \
 		usr.sbin/nmtree
+
+${_bt}-usr.sbin/nmtree: ${_bt}-lib/libnetbsd
 .endif
 
 .if ${BOOTSTRAPPING} < 1000027
@@ -1153,6 +1162,9 @@ _clang_tblgen= \
 	lib/clang/libllvmtablegen \
 	usr.bin/clang/tblgen \
 	usr.bin/clang/clang-tblgen
+
+${_bt}-usr.bin/clang/clang-tblgen: ${_bt}-lib/clang/libllvmtablegen ${_bt}-lib/clang/libllvmsupport
+${_bt}-usr.bin/clang/tblgen: ${_bt}-lib/clang/libllvmtablegen ${_bt}-lib/clang/libllvmsupport
 .endif
 
 .if ${MK_CDDL} != "no" && \
@@ -1161,16 +1173,28 @@ _clang_tblgen= \
       || (${MACHINE} != ${TARGET} || ${MACHINE_ARCH} != ${TARGET_ARCH}))
 _dtrace_tools= cddl/usr.bin/sgsmsg cddl/lib/libctf lib/libelf \
     lib/libdwarf cddl/usr.bin/ctfconvert cddl/usr.bin/ctfmerge
+
+${_bt}-cddl/usr.bin/ctfconvert: ${_bt}-lib/libelf ${_bt}-lib/libdwarf ${_bt}-cddl/lib/libctf
+${_bt}-cddl/usr.bin/ctfmerge: ${_bt}-lib/libelf ${_bt}-lib/libdwarf ${_bt}-cddl/lib/libctf
 .endif
 
 .if ${MK_FDT} != "no"
 _dtc= gnu/usr.bin/dtc
 .endif
 
+.if ${_BOOTSTRAP_MAKEINFO} != "no"
+_texinfo=	gnu/usr.bin/texinfo/libtxi \
+		gnu/usr.bin/texinfo/makeinfo \
+		gnu/usr.bin/texinfo/install-info
+
+${_bt}-gnu/usr.bin/texinfo/install-info: ${_bt}-gnu/usr.bin/texinfo/libtxi
+${_bt}-gnu/usr.bin/texinfo/makeinfo: ${_bt}-gnu/usr.bin/texinfo/libtxi
+.endif
+bootstrap-tools: .PHONY
+
 #	Please document (add comment) why something is in 'bootstrap-tools'.
 #	Try to bound the building of the bootstrap-tool to just the
 #	FreeBSD versions that need the tool built at this stage of the build.
-bootstrap-tools:
 .for _tool in \
     ${_clang_tblgen} \
     ${_dtrace_tools} \
@@ -1193,14 +1217,17 @@ bootstrap-tools:
     ${_gensnmptree} \
     usr.sbin/config \
     ${_crunchgen} \
-    gnu/usr.bin/texinfo \
-    ${_nmtree}
+    ${_nmtree} \
+    ${_texinfo}
+${_bt}-${_tool}: .PHONY .MAKE
 	${_+_}@${ECHODIR} "===> ${_tool} (obj,depend,all,install)"; \
 		cd ${.CURDIR}/${_tool}; \
 		${MAKE} DIRPRFX=${_tool}/ obj; \
 		${MAKE} DIRPRFX=${_tool}/ depend; \
 		${MAKE} DIRPRFX=${_tool}/ all; \
 		${MAKE} DIRPRFX=${_tool}/ DESTDIR=${MAKEOBJDIRPREFIX}/legacy install
+
+bootstrap-tools: ${_bt}-${_tool}
 .endfor
 
 #
@@ -1254,6 +1281,7 @@ build-tools:
 		${MAKE} DIRPRFX=${_tool}/ depend; \
 		${MAKE} DIRPRFX=${_tool}/ all
 .endfor
+
 
 #
 # cross-tools: Build cross-building tools
@@ -1363,7 +1391,7 @@ _prebuild_libs=	${_kerberos5_lib_libasn1} ${_kerberos5_lib_libhdb} \
 		lib/libkiconv lib/libkvm lib/liblzma lib/libmd \
 		lib/ncurses/ncurses lib/ncurses/ncursesw \
 		lib/libopie lib/libpam ${_lib_libthr} \
-		lib/libradius lib/libsbuf lib/libtacplus \
+		${_lib_libradius} lib/libsbuf lib/libtacplus \
 		${_cddl_lib_libumem} ${_cddl_lib_libnvpair} \
 		${_cddl_lib_libavl} \
 		${_cddl_lib_libzfs_core} \
@@ -1373,6 +1401,10 @@ _prebuild_libs=	${_kerberos5_lib_libasn1} ${_kerberos5_lib_libhdb} \
 
 .if ${MK_LIBTHR} != "no"
 _lib_libthr=	lib/libthr
+.endif
+
+.if ${MK_RADIUS_SUPPORT} != "no"
+_lib_libradius=	lib/libradius
 .endif
 
 .if ${MK_OFED} != "no"

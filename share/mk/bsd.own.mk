@@ -343,13 +343,17 @@ __DEFAULT_YES_OPTIONS = \
     BINUTILS \
     BLUETOOTH \
     BOOT \
+    BOOTPARAMD \
+    BOOTPD \
     BSD_CPIO \
+    BSDINSTALL \
     BSNMP \
     SOURCELESS \
     SOURCELESS_HOST \
     SOURCELESS_UCODE \
     BZIP2 \
     CALENDAR \
+    CCD \
     CDDL \
     CPP \
     CRYPT \
@@ -358,11 +362,15 @@ __DEFAULT_YES_OPTIONS = \
     CXX \
     DICT \
     DYNAMICROOT \
+    EE \
     EXAMPLES \
+    FILE \
+    FINGER \
     FLOPPY \
     FORTH \
     FP_LIBC \
     FREEBSD_UPDATE \
+    FTP \
     GAMES \
     GCC \
     GCOV \
@@ -371,9 +379,11 @@ __DEFAULT_YES_OPTIONS = \
     GPIB \
     GPIO \
     GROFF \
+    HAST \
     HTML \
     INET \
     INET6 \
+    INETD \
     INFO \
     INSTALLLIB \
     IPFILTER \
@@ -415,6 +425,8 @@ __DEFAULT_YES_OPTIONS = \
     PPP \
     PROFILE \
     QUOTAS \
+    RADIUS_SUPPORT \
+    RBOOTD \
     RCMDS \
     RCS \
     RESCUE \
@@ -426,9 +438,13 @@ __DEFAULT_YES_OPTIONS = \
     SYSINSTALL \
     SYMVER \
     SYSCONS \
+    TALK \
     TCSH \
+    TCP_WRAPPERS \
     TELNET \
     TEXTPROC \
+    TFTP \
+    TIMED \
     TOOLCHAIN \
     USB \
     UTMPX \
