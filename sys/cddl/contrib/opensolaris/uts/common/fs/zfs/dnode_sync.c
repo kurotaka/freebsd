@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
  */
 
 #include <sys/zfs_context.h>
@@ -479,8 +479,8 @@ dnode_undirty_dbufs(list_t *list)
 			    dr->dt.dl.dr_data == db->db_buf);
 			dbuf_unoverride(dr);
 		} else {
-			list_destroy(&dr->dt.di.dr_children);
 			mutex_destroy(&dr->dt.di.dr_mtx);
+			list_destroy(&dr->dt.di.dr_children);
 		}
 		kmem_free(dr, sizeof (dbuf_dirty_record_t));
 		dbuf_rele_and_unlock(db, (void *)(uintptr_t)txg);
@@ -688,6 +688,11 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 		return;
 	}
 
+	if (dn->dn_next_nlevels[txgoff]) {
+		dnode_increase_indirection(dn, tx);
+		dn->dn_next_nlevels[txgoff] = 0;
+	}
+
 	if (dn->dn_next_nblkptr[txgoff]) {
 		/* this should only happen on a realloc */
 		ASSERT(dn->dn_allocated_txg == tx->tx_txg);
@@ -712,12 +717,7 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 		mutex_exit(&dn->dn_mtx);
 	}
 
-	if (dn->dn_next_nlevels[txgoff]) {
-		dnode_increase_indirection(dn, tx);
-		dn->dn_next_nlevels[txgoff] = 0;
-	}
-
-	dbuf_sync_list(list, tx);
+	dbuf_sync_list(list, dn->dn_phys->dn_nlevels - 1, tx);
 
 	if (!DMU_OBJECT_IS_SPECIAL(dn->dn_object)) {
 		ASSERT3P(list_head(list), ==, NULL);
