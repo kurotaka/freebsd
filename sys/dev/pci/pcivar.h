@@ -124,6 +124,12 @@ struct pcicfg_ht {
     uint64_t	ht_msiaddr;	/* MSI mapping base address */
 };
 
+/* Interesting values for PCI-express */
+struct pcicfg_pcie {
+    uint8_t	pcie_location;	/* Offset of PCI-e capability registers. */
+    uint8_t	pcie_type;	/* Device type. */
+};
+
 /* config header information common to all header types */
 typedef struct pcicfg {
     struct device *dev;		/* device which owns this */
@@ -165,6 +171,7 @@ typedef struct pcicfg {
     struct pcicfg_msi msi;	/* PCI MSI */
     struct pcicfg_msix msix;	/* PCI MSI-X */
     struct pcicfg_ht ht;	/* HyperTransport */
+    struct pcicfg_pcie pcie;	/* PCI Express */
 } pcicfgregs;
 
 /* additional type 1 device config header information (PCI to PCI bridge) */
@@ -468,10 +475,15 @@ int	pci_msix_device_blacklisted(device_t dev);
 
 void	pci_ht_map_msi(device_t dev, uint64_t addr);
 
+device_t pci_find_pcie_root_port(device_t dev);
 int	pci_get_max_read_req(device_t dev);
 void	pci_restore_state(device_t dev);
 void	pci_save_state(device_t dev);
 int	pci_set_max_read_req(device_t dev, int size);
+uint32_t pcie_read_config(device_t dev, int reg, int width);
+void	pcie_write_config(device_t dev, int reg, uint32_t value, int width);
+uint32_t pcie_adjust_config(device_t dev, int reg, uint32_t mask,
+	    uint32_t value, int width);
 
 #endif	/* _SYS_BUS_H_ */
 

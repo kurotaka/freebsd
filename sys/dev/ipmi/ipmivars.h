@@ -105,6 +105,7 @@ struct ipmi_softc {
 	int			ipmi_opened;
 	struct cdev		*ipmi_cdev;
 	TAILQ_HEAD(,ipmi_request) ipmi_pending_requests;
+	int			ipmi_driver_requests_polled;
 	eventhandler_tag	ipmi_watchdog_tag;
 	int			ipmi_watchdog_active;
 	struct intr_config_hook	ipmi_ich;
@@ -222,7 +223,7 @@ struct ipmi_ipmb {
 	((sc)->ipmi_io_res[1] != NULL ? OUTB_MULTIPLE(sc, x, value) :	\
 	    OUTB_SINGLE(sc, x, value))
 
-#define MAX_TIMEOUT 3 * hz
+#define MAX_TIMEOUT 6 * hz
 
 int	ipmi_attach(device_t);
 int	ipmi_detach(device_t);

@@ -362,6 +362,7 @@ smic_loop(void *arg)
 
 	IPMI_LOCK(sc);
 	while ((req = ipmi_dequeue_request(sc)) != NULL) {
+		IPMI_UNLOCK(sc);
 		ok = 0;
 		for (i = 0; i < 3 && !ok; i++) {
 			IPMI_IO_LOCK(sc);
@@ -372,6 +373,7 @@ smic_loop(void *arg)
 			req->ir_error = 0;
 		else
 			req->ir_error = EIO;
+		IPMI_LOCK(sc);
 		ipmi_complete_request(sc, req);
 	}
 	IPMI_UNLOCK(sc);
@@ -413,6 +415,7 @@ ipmi_smic_attach(struct ipmi_softc *sc)
 	sc->ipmi_startup = smic_startup;
 	sc->ipmi_enqueue_request = ipmi_polled_enqueue_request;
 	sc->ipmi_driver_request = smic_driver_request;
+	sc->ipmi_driver_requests_polled = 1;
 
 	/* See if we can talk to the controller. */
 	flags = INB(sc, SMIC_FLAGS);

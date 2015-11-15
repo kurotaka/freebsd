@@ -798,6 +798,9 @@ pci_read_cap(device_t pcib, pcicfgregs *cfg)
 			 * at least one PCI-express device.
 			 */
 			pcie_chipset = 1;
+			cfg->pcie.pcie_location = ptr;
+			val = REG(ptr + PCIR_EXPRESS_FLAGS, 2);
+			cfg->pcie.pcie_type = val & PCIM_EXP_FLAGS_TYPE;
 			break;
 		default:
 			break;
@@ -1776,10 +1779,12 @@ pci_ht_map_msi(device_t dev, uint64_t addr)
 int
 pci_get_max_read_req(device_t dev)
 {
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	int cap;
 	uint16_t val;
 
-	if (pci_find_cap(dev, PCIY_EXPRESS, &cap) != 0)
+	cap = dinfo->cfg.pcie.pcie_location;
+	if (cap == 0)
 		return (0);
 	val = pci_read_config(dev, cap + PCIER_DEVICE_CTL, 2);
 	val &= PCIEM_CTL_MAX_READ_REQUEST;
@@ -1790,10 +1795,12 @@ pci_get_max_read_req(device_t dev)
 int
 pci_set_max_read_req(device_t dev, int size)
 {
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	int cap;
 	uint16_t val;
 
-	if (pci_find_cap(dev, PCIY_EXPRESS, &cap) != 0)
+	cap = dinfo->cfg.pcie.pcie_location;
+	if (cap == 0)
 		return (0);
 	if (size < 128)
 		size = 128;
@@ -1805,6 +1812,63 @@ pci_set_max_read_req(device_t dev, int size)
 	val |= (fls(size) - 8) << 12;
 	pci_write_config(dev, cap + PCIER_DEVICE_CTL, val, 2);
 	return (size);
+}
+
+uint32_t
+pcie_read_config(device_t dev, int reg, int width)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	int cap;
+
+	cap = dinfo->cfg.pcie.pcie_location;
+	if (cap == 0) {
+		if (width == 2)
+			return (0xffff);
+		return (0xffffffff);
+	}
+
+	return (pci_read_config(dev, cap + reg, width));
+}
+
+void
+pcie_write_config(device_t dev, int reg, uint32_t value, int width)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	int cap;
+
+	cap = dinfo->cfg.pcie.pcie_location;
+	if (cap == 0)
+		return;
+	pci_write_config(dev, cap + reg, value, width);
+}
+
+/*
+ * Adjusts a PCI-e capability register by clearing the bits in mask
+ * and setting the bits in (value & mask).  Bits not set in mask are
+ * not adjusted.
+ *
+ * Returns the old value on success or all ones on failure.
+ */
+uint32_t
+pcie_adjust_config(device_t dev, int reg, uint32_t mask, uint32_t value,
+    int width)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	uint32_t old, new;
+	int cap;
+
+	cap = dinfo->cfg.pcie.pcie_location;
+	if (cap == 0) {
+		if (width == 2)
+			return (0xffff);
+		return (0xffffffff);
+	}
+
+	old = pci_read_config(dev, cap + reg, width);
+	new = old & ~mask;
+	new |= (value & mask);
+	pci_write_config(dev, cap + reg, new, width);
+	return (old);
 }
 
 /*
@@ -4678,4 +4742,45 @@ pci_restore_state(device_t dev)
 
 	dinfo = device_get_ivars(dev);
 	pci_cfg_restore(dev, dinfo);
+}
+
+/* Find the upstream port of a given PCI device in a root complex. */
+device_t
+pci_find_pcie_root_port(device_t dev)
+{
+	struct pci_devinfo *dinfo;
+	devclass_t pci_class;
+	device_t pcib, bus;
+
+	pci_class = devclass_find("pci");
+	KASSERT(device_get_devclass(device_get_parent(dev)) == pci_class,
+	    ("%s: non-pci device %s", __func__, device_get_nameunit(dev)));
+
+	/*
+	 * Walk the bridge hierarchy until we find a PCI-e root
+	 * port or a non-PCI device.
+	 */
+	for (;;) {
+		bus = device_get_parent(dev);
+		KASSERT(bus != NULL, ("%s: null parent of %s", __func__,
+		    device_get_nameunit(dev)));
+
+		pcib = device_get_parent(bus);
+		KASSERT(pcib != NULL, ("%s: null bridge of %s", __func__,
+		    device_get_nameunit(bus)));
+
+		/*
+		 * pcib's parent must be a PCI bus for this to be a
+		 * PCI-PCI bridge.
+		 */
+		if (device_get_devclass(device_get_parent(pcib)) != pci_class)
+			return (NULL);
+
+		dinfo = device_get_ivars(pcib);
+		if (dinfo->cfg.pcie.pcie_location != 0 &&
+		    dinfo->cfg.pcie.pcie_type == PCIEM_TYPE_ROOT_PORT)
+			return (pcib);
+
+		dev = pcib;
+	}
 }
