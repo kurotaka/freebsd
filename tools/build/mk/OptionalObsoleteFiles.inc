@@ -460,6 +460,10 @@ OLD_FILES+=usr/share/man/man3/sdp_register_service.3.gz
 OLD_FILES+=usr/share/man/man3/sdp_search.3.gz
 OLD_FILES+=usr/share/man/man3/sdp_unregister_service.3.gz
 OLD_FILES+=usr/share/man/man3/sdp_uuid2desc.3.gz
+OLD_FILES+=usr/share/man/man4/ng_bluetooth.4.gz
+OLD_FILES+=usr/share/man/man5/bluetooth.device.conf.5.gz
+OLD_FILES+=usr/share/man/man5/bluetooth.hosts.5.gz
+OLD_FILES+=usr/share/man/man5/bluetooth.protocols.5.gz
 OLD_FILES+=usr/share/man/man5/hcsecd.conf.5.gz
 OLD_FILES+=usr/share/man/man8/bcmfw.8.gz
 OLD_FILES+=usr/share/man/man8/bt3cfw.8.gz
@@ -3693,6 +3697,7 @@ OLD_FILES+=usr/bin/rcsdiff
 OLD_FILES+=usr/bin/rcsfreeze
 OLD_FILES+=usr/bin/rcsmerge
 OLD_FILES+=usr/bin/rlog
+OLD_FILES+=usr/sbin/etcupdate
 OLD_FILES+=usr/share/man/man1/ci.1.gz
 OLD_FILES+=usr/share/man/man1/co.1.gz
 OLD_FILES+=usr/share/man/man1/ident.1.gz
@@ -3705,6 +3710,7 @@ OLD_FILES+=usr/share/man/man1/rcsintro.1.gz
 OLD_FILES+=usr/share/man/man1/rcsmerge.1.gz
 OLD_FILES+=usr/share/man/man1/rlog.1.gz
 OLD_FILES+=usr/share/man/man5/rcsfile.5.gz
+OLD_FILES+=usr/share/man/man8/etcupdate.8.gz
 .endif
 
 #.if ${MK_RESCUE} == no

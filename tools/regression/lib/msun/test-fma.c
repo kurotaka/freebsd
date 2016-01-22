@@ -31,11 +31,13 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#include <sys/param.h>
 #include <assert.h>
 #include <fenv.h>
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define	ALL_STD_EXCEPT	(FE_DIVBYZERO | FE_INEXACT | FE_INVALID | \
 			 FE_OVERFLOW | FE_UNDERFLOW)
@@ -362,47 +364,173 @@ test_accuracy(void)
 		0x1.d87da3aafda40p70L, 0x1.d87da3aafda3fp70L,
 		0x1.d87da3aafda3fp70L, ALL_STD_EXCEPT, FE_INEXACT);
 #endif
+
+	/* ilogb(x*y) - ilogb(z) = 0 */
+	testrnd(fmaf, 0x1.31ad02p+100, 0x1.2fbf7ap-42, -0x1.c3e106p+58,
+		-0x1.64c27cp+56, -0x1.64c27ap+56, -0x1.64c27cp+56,
+		-0x1.64c27ap+56, ALL_STD_EXCEPT, FE_INEXACT);
+	testrnd(fma, 0x1.31ad012ede8aap+100, 0x1.2fbf79c839067p-42,
+		-0x1.c3e106929056ep+58, -0x1.64c282b970a5fp+56,
+		-0x1.64c282b970a5ep+56, -0x1.64c282b970a5fp+56,
+		-0x1.64c282b970a5ep+56, ALL_STD_EXCEPT, FE_INEXACT);
+#if LDBL_MANT_DIG == 113
+	testrnd(fmal, 0x1.31ad012ede8aa282fa1c19376d16p+100L,
+		 0x1.2fbf79c839066f0f5c68f6d2e814p-42L,
+		-0x1.c3e106929056ec19de72bfe64215p+58L,
+		-0x1.64c282b970a612598fc025ca8cddp+56L,
+		-0x1.64c282b970a612598fc025ca8cddp+56L,
+		-0x1.64c282b970a612598fc025ca8cdep+56L,
+		-0x1.64c282b970a612598fc025ca8cddp+56L,
+		ALL_STD_EXCEPT, FE_INEXACT);
+#elif LDBL_MANT_DIG == 64
+	testrnd(fmal, 0x1.31ad012ede8aa4eap+100L, 0x1.2fbf79c839066aeap-42L,
+		-0x1.c3e106929056e61p+58L, -0x1.64c282b970a60298p+56L,
+		-0x1.64c282b970a60298p+56L, -0x1.64c282b970a6029ap+56L,
+		-0x1.64c282b970a60298p+56L, ALL_STD_EXCEPT, FE_INEXACT);
+#elif LDBL_MANT_DIG == 53
+	testrnd(fmal, 0x1.31ad012ede8aap+100L, 0x1.2fbf79c839067p-42L,
+		-0x1.c3e106929056ep+58L, -0x1.64c282b970a5fp+56L,
+		-0x1.64c282b970a5ep+56L, -0x1.64c282b970a5fp+56L,
+		-0x1.64c282b970a5ep+56L, ALL_STD_EXCEPT, FE_INEXACT);
+#endif
+
+	/* x*y (rounded) ~= -z */
+	/* XXX spurious inexact exceptions */
+	testrnd(fmaf, 0x1.bbffeep-30, -0x1.1d164cp-74, 0x1.ee7296p-104,
+		-0x1.c46ea8p-128, -0x1.c46ea8p-128, -0x1.c46ea8p-128,
+		-0x1.c46ea8p-128, ALL_STD_EXCEPT & ~FE_INEXACT, 0);
+	testrnd(fma, 0x1.bbffeea6fc7d6p-30, 0x1.1d164c6cbf078p-74,
+		-0x1.ee72993aff948p-104, -0x1.71f72ac7d9d8p-159,
+		-0x1.71f72ac7d9d8p-159, -0x1.71f72ac7d9d8p-159,
+		-0x1.71f72ac7d9d8p-159, ALL_STD_EXCEPT & ~FE_INEXACT, 0);
+#if LDBL_MANT_DIG == 113
+	testrnd(fmal, 0x1.bbffeea6fc7d65927d147f437675p-30L,
+		0x1.1d164c6cbf078b7a22607d1cd6a2p-74L,
+		-0x1.ee72993aff94973876031bec0944p-104L,
+		0x1.64e086175b3a2adc36e607058814p-217L,
+		0x1.64e086175b3a2adc36e607058814p-217L,
+		0x1.64e086175b3a2adc36e607058814p-217L,
+		0x1.64e086175b3a2adc36e607058814p-217L,
+		ALL_STD_EXCEPT & ~FE_INEXACT, 0);
+#elif LDBL_MANT_DIG == 64
+	testrnd(fmal, 0x1.bbffeea6fc7d6592p-30L, 0x1.1d164c6cbf078b7ap-74L,
+		-0x1.ee72993aff949736p-104L, 0x1.af190e7a1ee6ad94p-168L,
+		0x1.af190e7a1ee6ad94p-168L, 0x1.af190e7a1ee6ad94p-168L,
+		0x1.af190e7a1ee6ad94p-168L, ALL_STD_EXCEPT & ~FE_INEXACT, 0);
+#elif LDBL_MANT_DIG == 53
+	testrnd(fmal, 0x1.bbffeea6fc7d6p-30L, 0x1.1d164c6cbf078p-74L,
+		-0x1.ee72993aff948p-104L, -0x1.71f72ac7d9d8p-159L,
+		-0x1.71f72ac7d9d8p-159L, -0x1.71f72ac7d9d8p-159L,
+		-0x1.71f72ac7d9d8p-159L, ALL_STD_EXCEPT & ~FE_INEXACT, 0);
+#endif
+}
+
+static void
+test_double_rounding(void)
+{
+
+	/*
+	 *     a =  0x1.8000000000001p0
+	 *     b =  0x1.8000000000001p0
+	 *     c = -0x0.0000000000000000000000000080...1p+1
+	 * a * b =  0x1.2000000000001800000000000080p+1
+	 *
+	 * The correct behavior is to round DOWN to 0x1.2000000000001p+1 in
+	 * round-to-nearest mode.  An implementation that computes a*b+c in
+	 * double+double precision, however, will get 0x1.20000000000018p+1,
+	 * and then round UP.
+	 */
+	fesetround(FE_TONEAREST);
+	test(fma, 0x1.8000000000001p0, 0x1.8000000000001p0,
+	     -0x1.0000000000001p-104, 0x1.2000000000001p+1,
+	     ALL_STD_EXCEPT, FE_INEXACT);
+	fesetround(FE_DOWNWARD);
+	test(fma, 0x1.8000000000001p0, 0x1.8000000000001p0,
+	     -0x1.0000000000001p-104, 0x1.2000000000001p+1,
+	     ALL_STD_EXCEPT, FE_INEXACT);
+	fesetround(FE_UPWARD);
+	test(fma, 0x1.8000000000001p0, 0x1.8000000000001p0,
+	     -0x1.0000000000001p-104, 0x1.2000000000002p+1,
+	     ALL_STD_EXCEPT, FE_INEXACT);
+
+	fesetround(FE_TONEAREST);
+	test(fmaf, 0x1.800002p+0, 0x1.800002p+0, -0x1.000002p-46, 0x1.200002p+1,
+	     ALL_STD_EXCEPT, FE_INEXACT);
+	fesetround(FE_DOWNWARD);
+	test(fmaf, 0x1.800002p+0, 0x1.800002p+0, -0x1.000002p-46, 0x1.200002p+1,
+	     ALL_STD_EXCEPT, FE_INEXACT);
+	fesetround(FE_UPWARD);
+	test(fmaf, 0x1.800002p+0, 0x1.800002p+0, -0x1.000002p-46, 0x1.200004p+1,
+	     ALL_STD_EXCEPT, FE_INEXACT);
+
+	fesetround(FE_TONEAREST);
+#if LDBL_MANT_DIG == 64
+	test(fmal, 0x1.4p+0L, 0x1.0000000000000004p+0L, 0x1p-128L,
+	     0x1.4000000000000006p+0L, ALL_STD_EXCEPT, FE_INEXACT);
+#elif LDBL_MANT_DIG == 113
+	test(fmal, 0x1.8000000000000000000000000001p+0L,
+	     0x1.8000000000000000000000000001p+0L,
+	     -0x1.0000000000000000000000000001p-224L,
+	     0x1.2000000000000000000000000001p+1L, ALL_STD_EXCEPT, FE_INEXACT);
+#endif
+
 }
 
 int
 main(int argc, char *argv[])
 {
 	int rmodes[] = { FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO };
-	int i;
+	int i, j;
 
-	printf("1..18\n");
+	j = 1;
 
-	for (i = 0; i < 4; i++) {
+#if defined(__i386__)
+	printf("1..0 # SKIP all testcases fail on i386\n");
+	exit(0);
+#endif
+	printf("1..19\n");
+
+	for (i = 0; i < nitems(rmodes); i++, j++) {
+		printf("rmode = %d\n", rmodes[i]);
 		fesetround(rmodes[i]);
 		test_zeroes();
-		printf("ok %d - fma zeroes\n", i + 1);
+		printf("ok %d - fma zeroes\n", j);
 	}
 
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < nitems(rmodes); i++, j++) {
+		printf("rmode = %d\n", rmodes[i]);
 		fesetround(rmodes[i]);
 		test_infinities();
-		printf("ok %d - fma infinities\n", i + 5);
+		printf("ok %d - fma infinities\n", j);
 	}
 
 	fesetround(FE_TONEAREST);
 	test_nans();
-	printf("ok 9 - fma NaNs\n");
+	printf("ok %d - fma NaNs\n", j);
+	j++;
 
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < nitems(rmodes); i++, j++) {
+		printf("rmode = %d\n", rmodes[i]);
 		fesetround(rmodes[i]);
 		test_small_z();
-		printf("ok %d - fma small z\n", i + 10);
+		printf("ok %d - fma small z\n", j);
 	}
 
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < nitems(rmodes); i++, j++) {
+		printf("rmode = %d\n", rmodes[i]);
 		fesetround(rmodes[i]);
 		test_big_z();
-		printf("ok %d - fma big z\n", i + 14);
+		printf("ok %d - fma big z\n", j);
 	}
 
 	fesetround(FE_TONEAREST);
 	test_accuracy();
-	printf("ok 18 - fma accuracy\n");
+	printf("ok %d - fma accuracy\n", j);
+	j++;
+
+	test_double_rounding();
+	printf("ok %d - fma double rounding\n", j);
+	j++;
 
 	/*
 	 * TODO:
