@@ -1,9 +1,9 @@
-# soekris net6501 for home router
+# Shuttle DS57U for home router
 
 #cpu		I486_CPU
 #cpu		I586_CPU
 cpu		I686_CPU
-ident		NET6501
+ident		DS57U
 
 # To statically compile in device wiring instead of /boot/device.hints
 #hints		"GENERIC.hints"		# Default places to look for devices.
@@ -52,6 +52,11 @@ options 	KDTRACE_HOOKS		# Kernel DTrace hooks
 options 	INCLUDE_CONFIG_FILE     # Include this file in kernel
 options 	KDB			# Kernel debugger related code
 options 	KDB_TRACE		# Print a stack trace for a panic
+options 	DDB
+options 	KDB_UNATTENDED		# do not enter debugger on panic
+options 	BREAK_TO_DEBUGGER	# A BREAK on a serial console goes to
+					# ddb, if available.
+options 	ALT_BREAK_TO_DEBUGGER	# CR ~ ^b enters the debugger
 
 options 	ALTQ
 options 	ALTQ_CBQ	# Class Bases Queueing
@@ -74,8 +79,7 @@ device		apic		# I/O APIC
 device		cpufreq
 
 # Bus support.  Do not remove isa, even if you have no isa slots
-# net6501 does not have ACPI
-#device		acpi
+device		acpi
 device		isa
 device		pci
 #device		eisa
@@ -180,12 +184,12 @@ device		bpf		# Berkeley packet filter
 # USB support
 options 	USB_DEBUG	# enable debug msgs
 device		ehci		# UHCI PCI->USB interface
-#device		uhci		# UHCI PCI->USB interface
+device		uhci		# UHCI PCI->USB interface
 device		ohci		# OHCI PCI->USB interface
 device		usb		# USB Bus (required)
 #device		udbp		# USB Double Bulk Pipe devices
-#device		uhid		# "Human Interface Devices"
-#device		ukbd		# Keyboard
+device		uhid		# "Human Interface Devices"
+device		ukbd		# Keyboard
 #device		ulpt		# Printer
 #device		umass		# Disks/Mass storage - Requires scbus and da
 #device		ums		# Mouse
