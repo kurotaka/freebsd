@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/file.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
+#include <sys/capability.h>
 #include <sys/condvar.h>
 #include <sys/conf.h>
 #include <sys/fcntl.h>
@@ -52,10 +53,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/sysproto.h>
 #include <sys/uio.h>
 
-#if __FreeBSD_version >= 900041
-#include <sys/capability.h>
-#endif
-
 #include "filemon.h"
 
 #if defined(COMPAT_IA32) || defined(COMPAT_FREEBSD32) || defined(COMPAT_ARCH32)
@@ -71,8 +68,6 @@ extern struct sysentvec elf64_freebsd_sysvec;
 static d_close_t	filemon_close;
 static d_ioctl_t	filemon_ioctl;
 static d_open_t		filemon_open;
-static int		filemon_unload(void);
-static void		filemon_load(void *);
 
 static struct cdevsw filemon_cdevsw = {
 	.d_version	= D_VERSION,
@@ -89,7 +84,7 @@ struct filemon {
 	TAILQ_ENTRY(filemon) link;	/* Link into the in-use list. */
 	struct sx	lock;		/* Lock mutex for this filemon. */
 	struct file	*fp;		/* Output file pointer. */
-	pid_t		pid;		/* The process ID being monitored. */
+	struct proc     *p;		/* The process being monitored. */
 	char		fname1[MAXPATHLEN]; /* Temporary filename buffer. */
 	char		fname2[MAXPATHLEN]; /* Temporary filename buffer. */
 	char		msgbufr[1024];	/* Output message buffer. */
@@ -99,46 +94,26 @@ static TAILQ_HEAD(, filemon) filemons_inuse = TAILQ_HEAD_INITIALIZER(filemons_in
 static TAILQ_HEAD(, filemon) filemons_free = TAILQ_HEAD_INITIALIZER(filemons_free);
 static struct sx access_lock;
 
-#if __FreeBSD_version < 701000
-static struct clonedevs *filemon_clones;
-static eventhandler_tag	eh_tag;
-#else
 static struct cdev *filemon_dev;
-#endif
 
 #include "filemon_lock.c"
 #include "filemon_wrapper.c"
 
-#if __FreeBSD_version < 701000
 static void
-filemon_clone(void *arg, struct ucred *cred, char *name, int namelen,
-    struct cdev **dev)
+filemon_comment(struct filemon *filemon)
 {
-	int u = -1;
-	size_t len;
+	int len;
+	struct timeval now;
 
-	if (*dev != NULL)
-		return;
+	getmicrotime(&now);
 
-	len = strlen(name);
+	len = snprintf(filemon->msgbufr, sizeof(filemon->msgbufr),
+	    "# filemon version %d\n# Target pid %d\n# Start %ju.%06ju\nV %d\n",
+	    FILEMON_VERSION, curproc->p_pid, (uintmax_t)now.tv_sec,
+	    (uintmax_t)now.tv_usec, FILEMON_VERSION);
 
-	if (len != 7)
-		return;
-
-	if (bcmp(name,"filemon", 7) != 0)
-		return;
-
-	/* Clone the device to the new minor number. */
-	if (clone_create(&filemon_clones, &filemon_cdevsw, &u, dev, 0) != 0)
-		/* Create the /dev/filemonNN entry. */
-		*dev = make_dev_cred(&filemon_cdevsw, u, cred, UID_ROOT,
-		    GID_WHEEL, 0666, "filemon%d", u);
-	if (*dev != NULL) {
-		dev_ref(*dev);
-		(*dev)->si_flags |= SI_CHEAPCLONE;
-	}
+	filemon_output(filemon, filemon->msgbufr, len);
 }
-#endif
 
 static void
 filemon_dtr(void *data)
@@ -146,21 +121,24 @@ filemon_dtr(void *data)
 	struct filemon *filemon = data;
 
 	if (filemon != NULL) {
-		struct file *fp = filemon->fp;
+		struct file *fp;
 
-		/* Get exclusive write access. */
+		/* Follow same locking order as filemon_pid_check. */
 		filemon_lock_write();
+		sx_xlock(&filemon->lock);
 
 		/* Remove from the in-use list. */
 		TAILQ_REMOVE(&filemons_inuse, filemon, link);
 
+		fp = filemon->fp;
 		filemon->fp = NULL;
-		filemon->pid = -1;
+		filemon->p = NULL;
 
 		/* Add to the free list. */
 		TAILQ_INSERT_TAIL(&filemons_free, filemon, link);
 
 		/* Give up write access. */
+		sx_xunlock(&filemon->lock);
 		filemon_unlock_write();
 
 		if (fp != NULL)
@@ -176,20 +154,20 @@ filemon_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag __unused,
 	struct filemon *filemon;
 	struct proc *p;
 
-#if __FreeBSD_version < 701000
-	filemon = dev->si_drv1;
-#else
-	devfs_get_cdevpriv((void **) &filemon);
-#endif
+	if ((error = devfs_get_cdevpriv((void **) &filemon)) != 0)
+		return (error);
+
+	sx_xlock(&filemon->lock);
 
 	switch (cmd) {
 	/* Set the output file descriptor. */
 	case FILEMON_SET_FD:
-#if __FreeBSD_version < 900041
-#define FGET_WRITE(a1, a2, a3) fget_write((a1), (a2), (a3))
-#else
+		if (filemon->fp != NULL) {
+			error = EEXIST;
+			break;
+		}
+
 #define FGET_WRITE(a1, a2, a3) fget_write((a1), (a2), CAP_WRITE | CAP_SEEK, (a3))
-#endif
 		if ((error = FGET_WRITE(td, *(int *)data, &filemon->fp)) == 0)
 			/* Write the file header. */
 			filemon_comment(filemon);
@@ -200,7 +178,7 @@ filemon_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag __unused,
 		error = pget(*((pid_t *)data), PGET_CANDEBUG | PGET_NOTWEXIT,
 		    &p);
 		if (error == 0) {
-			filemon->pid = p->p_pid;
+			filemon->p = p;
 			PROC_UNLOCK(p);
 		}
 		break;
@@ -210,6 +188,7 @@ filemon_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag __unused,
 		break;
 	}
 
+	sx_xunlock(&filemon->lock);
 	return (error);
 }
 
@@ -234,13 +213,7 @@ filemon_open(struct cdev *dev, int oflags __unused, int devtype __unused,
 		sx_init(&filemon->lock, "filemon");
 	}
 
-	filemon->pid = curproc->p_pid;
-
-#if __FreeBSD_version < 701000
-	dev->si_drv1 = filemon;
-#else
 	devfs_set_cdevpriv(filemon, filemon_dtr);
-#endif
 
 	/* Get exclusive write access. */
 	filemon_lock_write();
@@ -258,14 +231,6 @@ static int
 filemon_close(struct cdev *dev __unused, int flag __unused, int fmt __unused,
     struct thread *td __unused)
 {
-#if __FreeBSD_version < 701000
-	filemon_dtr(dev->si_drv1);
-
-	dev->si_drv1 = NULL;
-
-	/* Schedule this cloned device to be destroyed. */
-	destroy_dev_sched(dev);
-#endif
 
 	return (0);
 }
@@ -278,16 +243,8 @@ filemon_load(void *dummy __unused)
 	/* Install the syscall wrappers. */
 	filemon_wrapper_install();
 
-#if __FreeBSD_version < 701000
-	/* Enable device cloning. */
-	clone_setup(&filemon_clones);
-
-	/* Setup device cloning events. */
-	eh_tag = EVENTHANDLER_REGISTER(dev_clone, filemon_clone, 0, 1000);
-#else
 	filemon_dev = make_dev(&filemon_cdevsw, 0, UID_ROOT, GID_WHEEL, 0666,
 	    "filemon");
-#endif
 }
 
 static int
@@ -302,9 +259,7 @@ filemon_unload(void)
 	if (TAILQ_FIRST(&filemons_inuse) != NULL)
 		error = EBUSY;
 	else {
-#if __FreeBSD_version >= 701000
 		destroy_dev(filemon_dev);
-#endif
 
 		/* Deinstall the syscall wrappers. */
 		filemon_wrapper_deinstall();
@@ -314,19 +269,6 @@ filemon_unload(void)
 	filemon_unlock_write();
 
 	if (error == 0) {
-#if __FreeBSD_version < 701000
-		/*
-		 * Check if there is still an event handler callback registered.
-		*/
-		if (eh_tag != 0) {
-			/* De-register the device cloning event handler. */
-			EVENTHANDLER_DEREGISTER(dev_clone, eh_tag);
-			eh_tag = 0;
-
-			/* Stop device cloning. */
-			clone_cleanup(&filemon_clones);
-		}
-#endif
 		/* free() filemon structs free list. */
 		filemon_lock_write();
 		while ((filemon = TAILQ_FIRST(&filemons_free)) != NULL) {
@@ -354,6 +296,14 @@ filemon_modevent(module_t mod __unused, int type, void *data)
 
 	case MOD_UNLOAD:
 		error = filemon_unload();
+		break;
+
+	case MOD_QUIESCE:
+		/*
+		 * The wrapper implementation is unsafe for reliable unload.
+		 * Require forcing an unload.
+		 */
+		error = EBUSY;
 		break;
 
 	case MOD_SHUTDOWN:

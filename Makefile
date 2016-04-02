@@ -113,6 +113,8 @@ TGTS+=	${BITGTS}
 .ORDER: buildworld installworld
 .ORDER: buildworld distributeworld
 .ORDER: buildworld buildkernel
+.ORDER: installworld distribution
+.ORDER: installworld installkernel
 .ORDER: buildkernel installkernel
 .ORDER: buildkernel installkernel.debug
 .ORDER: buildkernel reinstallkernel
@@ -422,7 +424,8 @@ universe_kernels: universe_kernconfs
 TARGET!=	uname -m
 .endif
 KERNCONFS!=	cd ${KERNSRCDIR}/${TARGET}/conf && \
-		find [A-Z0-9]*[A-Z0-9] -type f -maxdepth 0 \
+		find [[:upper:][:digit:]]*[[:upper:][:digit:]] \
+		-type f -maxdepth 0 \
 		! -name DEFAULTS ! -name NOTES
 universe_kernconfs:
 .for kernel in ${KERNCONFS}
